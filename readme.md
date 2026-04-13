@@ -38,33 +38,36 @@ This project presents a transformer-based framework trained with Proximal Policy
 
 ### Setup and training
 
-Requirements:
+#### Requirements
 - Rust 1.86.0 (recommended to use [rustup](https://rust-lang.org/tools/install/))
 - Python 3.14
 - GCC 15.2.1
 - CUDA 13.1
 
-Setup:
-- Create and activate a python virtualenv at `.venv`:
-  ```bash
-  python .m venv .venv  # must either use this location or change it in pysparse.sh
-  source .venv/bin/activate
-  ```
-- Install required python packages:
-  ```bash
-  pip install -r requirements.txt
-  ```
+#### Setup
+Create and activate a python virtualenv at `.venv`:
+```bash
+python .m venv .venv  # must either use this location or change it in pysparse.sh
+source .venv/bin/activate
+```
 
-Training:
-- All hyperparameters are configured by default to the values used for experiments presented in the paper. Run the following:
-  ```bash
-  cargo run --release -p trainer
-  ```
-- Hyperparameters and other options can be configured on the CLI. Run the following to see all options:
-  ```
-  cargo run --release -p trainer -- --help
-  ```
-- Any warnings produced by the compiler can be ignored safely.
+Install required python packages:
+```bash
+pip install -r requirements.txt
+```
+
+#### Training
+All hyperparameters are configured by default to the values used for experiments presented in the paper. Run the following:
+```bash
+cargo run --release -p trainer
+```
+
+Hyperparameters and other options can be configured on the CLI. Run the following to see all options:
+```
+cargo run --release -p trainer -- --help
+```
+
+Any warnings produced by the compiler can be ignored safely.
 
 ## Other notes
 
