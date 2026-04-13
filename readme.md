@@ -1,6 +1,6 @@
 ## Learning-Based Sparsification of Dynamic Graphs in Robotic Exploration Algorithms
 
-<a href="https://arxiv.org"><img src="https://img.shields.io/badge/arXiv--green"></a>
+<a href="https://arxiv.org/abs"><img src="https://img.shields.io/badge/arXiv-Preprint-b31b1b"></a>
 
 <table>
   <tr>
