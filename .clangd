@@ -1,0 +1,4 @@
+Diagnostics:
+  Suppress: 
+    - "constexpr_non_literal_return"
+    - "conv_mixed_enum_types_cxx26"

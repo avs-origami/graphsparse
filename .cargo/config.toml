@@ -1,0 +1,6 @@
+[target.'cfg(unix)']
+rustflags = [
+    # "-C", "link-arg=-fuse-ld=gold"
+    "-C", "link-arg=-Wl,--export-dynamic",
+    "-C", "link-arg=-Wl,--no-gc-sections"
+]
