@@ -57,7 +57,7 @@ pip install -r requirements.txt
 ```
 
 #### Training
-All hyperparameters are configured by default to the values used for experiments presented in the paper. Run the following:
+All hyperparameters are configured by default to the values used for experiments presented in the paper. Run the following to begin training:
 ```bash
 cargo run --release -p trainer
 ```
