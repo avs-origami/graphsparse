@@ -77,7 +77,7 @@ This code was primarily developed and tested on Arch Linux, so some system softw
   title={Learning-Based Sparsification of Dynamic Graphs in Robotic Exploration Algorithms},
   author={Sastry, Adithya V. and Poudel, Bibek and Li, Weizi},
   year={2026},
-  eprint={2504.05018},
+  eprint={},
   archivePrefix={arXiv},
   primaryClass={cs.LG},
   url={https://arxiv.org/abs/},
