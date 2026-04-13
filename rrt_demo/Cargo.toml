@@ -1,0 +1,24 @@
+[package]
+name = "rrt_demo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rrt_lib = { path = "../rrt_lib" }
+sim = {path = "../sim" }
+util = { path = "../util" }
+# algebra = { path = "../algebra" }
+pysparse = { path = "../pysparse" }
+
+peak_alloc = "0.2.0"
+ctrlc = "3.4.2"
+get-size = "0.1.4"
+rand = "0.8.5"
+lazy_static = "1.5.0"
+clap = { version = "4.0", features = ["derive"] }
+measure_time = "0.9"
+anyhow = "1.0"
+indicatif = "0.17.8"
+png = "0.17"
+hex = "0.4.3"
+rayon = "1.10.0"

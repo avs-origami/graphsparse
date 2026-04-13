@@ -1,0 +1,20 @@
+[workspace]
+
+members = [
+    "util",
+    "rrt_lib",
+    "sim",
+    "trainer",
+    "pysparse",
+    "rrt_fast",
+    "demo",
+    "rrt_demo",
+]
+
+resolver = "2"
+
+[profile.dev]
+opt-level = 3
+
+[profile.release]
+debug = true

@@ -1,0 +1,31 @@
+[package]
+name = "sim"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = { version = "0.8.5", features = ["small_rng"] }
+minifb = "0.27"
+png = "0.17"
+hex = "0.4.3"
+ctrlc = "3.4.2"
+util = { path = "../util" }
+# algebra = { path = "../algebra" }
+chrono = { version = "0.4.31", features = ["clock"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
+clap = { version = "4.0", features = ["derive"] }
+serde_json = "1.0"
+get-size = "0.1.4"
+bufreaderwriter = "0.2.4"
+shmem-ipc = "0.3"
+passfd = "0.1.6"
+num-traits = "0.2.19"
+num-derive = "0.4.2"
+anyhow = "1.0"
+rayon = "1.10.0"
+
+[[bin]]
+name = "sim_no_win"
+path = "src/main_no_win.rs"
