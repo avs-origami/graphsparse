@@ -15,9 +15,9 @@
     </td>
   </tr>
   <tr>
-    <td align="center"><b>(a) Exploration without pruning.</b></td>
-    <td align="center"><b>(b) Exploration under random pruning.</b></td>
-    <td align="center"><b>(c) Exploration under learned pruning.</b></td>
+    <td align="center"><b>Exploration without pruning.</b></td>
+    <td align="center"><b>Exploration under random pruning.</b></td>
+    <td align="center"><b>Exploration under learned pruning.</b></td>
   </tr>
 </table>
 
