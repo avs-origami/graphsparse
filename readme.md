@@ -47,7 +47,7 @@ This project presents a transformer-based framework trained with Proximal Policy
 #### Setup
 Create and activate a python virtualenv at `.venv`:
 ```bash
-python .m venv .venv  # must either use this location or change it in pysparse.sh
+python -m venv .venv  # must either use this location or change it in pysparse.sh
 source .venv/bin/activate
 ```
 
