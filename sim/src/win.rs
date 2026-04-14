@@ -83,7 +83,7 @@ impl Win {
 
     pub fn update(&mut self) -> Result<()> {
         for (n, i) in self.buf.iter_mut().enumerate() {
-            if is_agent(n as i32, self.rob.fb_coords() as i32, 1)
+            if n as u32 == self.rob.fb_coords()
                 && *i != GREEN
                 && *i != DPURPLE
                 && *i != BLUE

@@ -35,7 +35,7 @@ pub enum OnOff {
 ///     ..Default::default()
 /// };
 /// ```
-#[derive(Clone, Copy, Debug, Parser, Serialize)]
+#[derive(Clone, Debug, Parser, Serialize)]
 #[command(about = "Program used to train the RL model", long_about = None)]
 pub struct GlobalOpts {
     // =========================================
@@ -187,33 +187,39 @@ pub struct GlobalOpts {
     /// Random pruning.
     #[arg(long, default_value_t = DEF.random)]
     pub random: bool,
+    /// Seed for the RNG.
+    #[arg(long)]
+    pub seed: Option<u64>,
+    /// Load model files.
+    #[arg(long, value_delimiter = ',')]
+    pub load: Option<Vec<String>>,
     /// Directory to save model files.
-    #[clap(skip)]
-    pub save_dir: &'static str,
+    #[arg(long, default_value_t = DEF.save_dir.clone())]
+    pub save_dir: String,
 }
 
 impl Default for GlobalOpts {
     fn default() -> Self {
         GlobalOpts {
-            episodes: 2000,
-            num_steps: 512,
-            num_moves: 100,
+            episodes: 750,
+            num_steps: 128,
+            num_moves: 50,
             num_envs: 1,
             ppo_epochs: 4,
-            num_minis: 4,
+            num_minis: 32,
             warmup: 5,
             num_prune: 25,
-            prune_frac: 0.96,
-            hidden_size: 512,
-            num_hidden: 6,
+            prune_frac: 0.5,
+            hidden_size: 256,
+            num_hidden: 5,
             num_actions: 2,
-            d_model: 1024,
+            d_model: 128,
             gtrxl_layers: 3,
             num_heads: 8,
-            d_head_inner: 512,
-            d_ff_inner: 512,
+            d_head_inner: 64,
+            d_ff_inner: 128,
             d_comp: 64,
-            gtrxl_mem_len: 400,
+            gtrxl_mem_len: 100 * 8,
             img_size: 250,
             patch_size: 25,
             img_chan: 3,
@@ -226,26 +232,20 @@ impl Default for GlobalOpts {
             lr: 3e-4,
             gamma: 0.99,
             gae_lambda: 0.95,
-            clip_coef: 0.1,
+            clip_coef: 0.2,
             ent_coef: 0.01,
             vf_coef: 0.5,
             max_grad_norm: 0.5,
             target_kl: 0.03,
-            clutter: Clutter::Mid,
+            clutter: Clutter::Low,
             render: false,
             dbg: false,
             test: false,
             no_prune: false,
             random: false,
-            save_dir: "models",
+            seed: None,
+            load: None,
+            save_dir: "models".into(),
         }
-    }
-}
-
-impl GlobalOpts {
-    pub fn from_cli() -> Self {
-        let mut me = GlobalOpts::parse();
-        me.save_dir = DEF.save_dir;
-        return me;
     }
 }

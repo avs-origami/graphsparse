@@ -7,6 +7,7 @@ import random
 import time
 from dataclasses import dataclass, fields
 from typing import Callable, Optional, Tuple
+import threading
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -182,12 +183,15 @@ class Args:
     
     dbg: bool = False
     """Whether to show debugging info"""
-
-    test: bool = False
-    """Whether to enable test mode"""
     
     save_dir: str = "models"
     """Directory to save model files"""
+
+    test: bool = False,
+    """Don't train the model, just test"""
+
+    no_prune: bool = False,
+    """Disable pruning. Only takes effect when used with --test"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -256,6 +260,10 @@ class Agent(nn.Module):
             args.d_model
         )
 
+        # self.atok = nn.Linear(args.num_gauss * 2, args.d_model)
+        # self.rtok = nn.Linear(1, args.d_model)
+        # self.pemb = nn.Embedding(2, args.d_model)
+
         self.gtrxl = StableTransformerXL(
             args.d_model,
             args.gtrxl_layers,
@@ -272,6 +280,8 @@ class Agent(nn.Module):
 
         self.critic = LinHead("critic", args.d_comp * 100, args.hidden_size, args.num_hidden, 1).to(DEV)
         self.gauss = GMMHead(args.d_comp * 100, args.hidden_size, args.num_hidden, args.num_gauss).to(DEV)
+        self.sincos = LinHead("actor", args.d_comp * 100, args.hidden_size, args.num_hidden, 2).to(DEV)
+        self.sincos_std = nn.Parameter(torch.zeros(1, 2))
 
         self.stochastic = (args.stochastic == "On")
 
@@ -299,7 +309,25 @@ class Agent(nn.Module):
         #     PREV = None
         # else:
         #     PREV = tokens
-        
+
+        # Tokenize the context and combine it with the patch tokens.
+        # atok = self.atok.forward(ctx[0])
+        # rtok = self.rtok.forward(ctx[1])
+
+        # if len(rtok.shape) == 1:
+        #     rtok = rtok.unsqueeze(0)
+
+        # posn = torch.arange(0, 2, dtype=torch.int64, device=DEV).unsqueeze(0)
+        # posn = posn.expand([patches.size(0), -1])
+        # pemb = self.pemb.forward(posn)
+
+        # if atok.size(0) != 1:
+        #     info(atok.shape, rtok.shape, tokens.shape, pemb.shape)
+
+        # context = torch.stack([atok, rtok], dim=1)
+        # context += pemb
+
+        # tokens = torch.cat([tokens, context], dim=1)
 
         # Pass the tokens through the GTrXL.
         tform: dict[str, Tensor] = self.gtrxl.forward(tokens.permute(1, 0, 2))
@@ -315,11 +343,11 @@ class Agent(nn.Module):
 
         return out
 
-    def get_value(self, x):
+    def get_value(self, x: Tensor):
         out = self.tform(x)
         return self.critic(out.flatten(1))
 
-    def get_action_and_value(self, x: Tensor, action: tuple[Tensor, Tensor, Tensor] | None = None, stoch=None):
+    def get_action_and_value(self, x: Tensor, action: tuple[Tensor, Tensor, Tensor, Tensor] | None = None, stoch=None):
         out = self.tform(x)
         if stoch is not None:
             if not stoch:
@@ -330,10 +358,10 @@ class Agent(nn.Module):
         
         # Get GMM parameters directly
         if stoch is None:
-            means, logstds, weights_logits, md, ld, wd = self.gauss.forward(out.flatten(1), stochastic=self.stochastic)
+            means, logstds, weights_logits, thingy, md, ld, wd = self.gauss.forward(out.flatten(1), stochastic=self.stochastic)
         else:
-            means, logstds, weights_logits, md, ld, wd = self.gauss.forward(out.flatten(1), stochastic=stoch)
-            if not stoch:
+            means, logstds, weights_logits, thingy, md, ld, wd = self.gauss.forward(out.flatten(1), stochastic=stoch)
+            if not stoch and not self.args.test:
                 global PREV
                 if PREV is not None:
                     tviz((means.squeeze(0) - PREV[0].squeeze(0)).t())
@@ -351,14 +379,20 @@ class Agent(nn.Module):
         gmm_list = []
         
         for i in range(batch_size):
+            mlogstds = logstds.clone()
+            mlogstds[..., 0] = torch.where(weights_logits < 0.5, 13, mlogstds[..., 0])
+            mlogstds[..., 1] = torch.where(weights_logits < 0.5, 13, mlogstds[..., 1])
+            mweights_logits = torch.where(weights_logits < 0.5, -1e10, weights_logits)
             # Create component distribution
             component_dist = MultivariateNormal(
                 loc=means[i],
-                scale_tril=torch.diag_embed(torch.exp(logstds[i]))
+                scale_tril=torch.diag_embed(torch.exp(mlogstds[i]))
             )
             
             # Create mixture distribution 
-            mixture_dist = Categorical(logits=weights_logits[i])
+            mixture_dist = Categorical(logits=mweights_logits[i])
+            # print(mixture_dist.logits)
+            # print(torch.cat([weights_logits[i], torch.full((1,), 10).to(DEV)], dim=0))
             
             # Create the GMM
             gmm = MixtureSameFamily(
@@ -369,41 +403,51 @@ class Agent(nn.Module):
             gmm_list.append(gmm)
         
         gmm = GaussMix(gmm_list)
+
+        sincos = self.sincos.forward(out.flatten(1))
+        scd = Normal(sincos, self.sincos_std.exp())
+        if stoch is None:
+            stoch = self.stochastic
+
+        if stoch:
+            sincos = scd.sample()
         
         # Sample actions
         if action is None:
-            action = (means, logstds, weights_logits)
+            action = (means, logstds, weights_logits, sincos)
         
         # Calculate log probabilities and entropy of the GMM
-        log_prob = md.log_prob(action[0]).sum(-1).sum(-1) + ld.log_prob(action[1]).sum(-1).sum(-1) + wd.log_prob(action[2]).sum(-1)
-        entropy = md.entropy().sum(-1).sum(-1) + ld.entropy().sum(-1).sum(-1) + wd.entropy().sum(-1)
+        log_prob = md.log_prob(action[0]).sum(-1).sum(-1) + ld.log_prob(action[1]).sum(-1).sum(-1) + wd.log_prob(action[2]).sum(-1) + scd.log_prob(action[3]).sum(-1)
+        entropy = md.entropy().sum(-1).sum(-1) + ld.entropy().sum(-1).sum(-1) + wd.entropy().sum(-1) + scd.entropy().sum(-1)
         
-        params = (means, logstds, weights_logits)
-        return action, params, gmm, log_prob, entropy, self.critic.forward(out.flatten(1))
+        params = (means, logstds, weights_logits, sincos)
+        return thingy, params, gmm, log_prob, entropy, self.critic.forward(out.flatten(1))
     
-    def viz_3d(self, params: Tuple[Tensor, Tensor, Tensor, Normal, Normal, Normal], gmm: GaussMix, image_tensor, step=0, save_path=None):
+    def get_logprobs(self, dist: Normal, means: Tensor) -> Tensor:
+        log_prob = dist.log_prob(means).sum(-1).sum(-1)
+        return log_prob
+
+    
+    def viz_3d(self, params: Tuple[Tensor, Tensor, Tensor, Normal, Normal, Normal], gmm: GaussMix, jitter, image_tensor, step=0, save_path=None):
         """Create a 3D visualization of the GMM PDF overlaid on the input image."""
         with torch.no_grad():
-            out = self.tform(image_tensor).flatten(1)
-            params = self.gauss.forward(out, stochastic=False)
-            # Convert to numpy for visualization
-            means_np = params[0].reshape(-1, self.args.num_gauss, 2)[0].cpu()
-            logstds_np = params[1].reshape(-1, self.args.num_gauss, 2)[0].cpu()
-            weights_np = params[2].reshape(-1, self.args.num_gauss)[0].cpu()
-            
             # Save visualization
-            if save_path:
-                os.makedirs(save_path, exist_ok=True)
+            def thing():
+                if save_path:
+                    os.makedirs(save_path, exist_ok=True)
+                    
+                fig = visualize_gmm_3d_on_image(
+                    gmm,
+                    jitter,
+                    image_tensor,
+                    # samples=greedy_sample_np,
+                    title=f"GMM Distribution at step {step}",
+                    save_path=f"{save_path}/gmm_3d_overlay_{step}.png" if save_path else None
+                )
                 
-            fig = visualize_gmm_3d_on_image(
-                means_np, 
-                logstds_np, 
-                weights_np,
-                image_tensor,
-                # samples=greedy_sample_np,
-                title=f"GMM Distribution at step {step}",
-                save_path=f"{save_path}/gmm_3d_overlay_{step}.png" if save_path else None
-            )
-            
-            if not save_path:
-                return fig
+                if not save_path:
+                    return fig
+                
+            t = threading.Thread(target=thing)
+            t.start()
+            # thing()

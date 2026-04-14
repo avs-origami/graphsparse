@@ -48,9 +48,9 @@ pub struct RrtInc {
 
 impl RrtInc {
     pub fn new(start: Option<Pnt>, opts: GlobalOpts) -> Result<(RrtInc, std::thread::JoinHandle<()>)> {
-        let _ = rayon::ThreadPoolBuilder::new().num_threads(15).build_global();
-        
-        let rrt = Algorithm::new(start.unwrap_or(START), STEP, None)?;
+        let _ = rayon::ThreadPoolBuilder::new().num_threads(12).build_global();
+
+        let rrt = Algorithm::new(start.unwrap_or(START), STEP, opts.seed)?;
         let current = rrt.start.clone();
 
         let sml = Arc::new(Sim::new(
@@ -59,7 +59,7 @@ impl RrtInc {
                 child_alg_args: None,
                 clutter: opts.clutter,
                 scale: None,
-                seed: None,
+                seed: opts.seed,
                 phasing: false
             },
             start.unwrap_or(START),
@@ -164,7 +164,7 @@ impl RrtInc {
             update_frontiers(&mut self.frontiers, &self.rrt.tree, &self.map, self.current.clone());
 
             // Make sure we haven't exceeded the timeout
-            if now.elapsed().as_secs() > TIMEOUT || self.total_time > TIMEOUT { self.greg += self.regen_attempts; return Ok((Exit::Timeout, gain)); }
+            if now.elapsed().as_secs() > TIMEOUT || self.total_time > TIMEOUT { self.greg += self.regen_attempts + 1; return Ok((Exit::Timeout, gain)); }
 
             // Determine the destination node
             let mut dest_maybe = None;
@@ -338,9 +338,9 @@ impl RrtInc {
                         gain = self.coverage;
                         self.coverage = self.sml.req::<f32>(Coverage)?[0];
                         gain = self.coverage - gain;
-                        if self.coverage >= COV_MAX { self.greg += self.regen_attempts; return Ok((Exit::Finish, gain)); }
+                        if self.coverage >= COV_MAX { self.greg += self.regen_attempts + 1; return Ok((Exit::Finish, gain)); }
 
-                        if now.elapsed().as_secs() > TIMEOUT || self.total_time > TIMEOUT { self.greg += self.regen_attempts; return Ok((Exit::Timeout, gain)); }
+                        if now.elapsed().as_secs() > TIMEOUT || self.total_time > TIMEOUT { self.greg += self.regen_attempts + 1; return Ok((Exit::Timeout, gain)); }
                         // if *ctrlc_exit.lock().unwrap() { break 'o; }
 
                         if self.sml.req::<f32>(Coverage)?[0] >= self.dumps * 5.0 {
@@ -384,8 +384,8 @@ impl RrtInc {
             gain = self.coverage;
             self.coverage = self.sml.req::<f32>(Coverage)?[0];
             gain = self.coverage - gain;
-            if self.coverage >= COV_MAX { self.greg += self.regen_attempts; return Ok((Exit::Finish, gain)); }
-            if now.elapsed().as_secs() > TIMEOUT || self.total_time > TIMEOUT { self.greg += self.regen_attempts; return Ok((Exit::Timeout, gain)); }
+            if self.coverage >= COV_MAX { self.greg += self.regen_attempts + 1; return Ok((Exit::Finish, gain)); }
+            if now.elapsed().as_secs() > TIMEOUT || self.total_time > TIMEOUT { self.greg += self.regen_attempts + 1; return Ok((Exit::Timeout, gain)); }
             // if *ctrlc_exit.lock().unwrap() { break 'o; }
 
             if self.sml.req::<f32>(Coverage)?[0] >= self.dumps * 5.0 {
@@ -400,7 +400,7 @@ impl RrtInc {
         }
 
         self.total_time += now.elapsed().as_secs();
-        self.greg += self.regen_attempts;
+        self.greg += self.regen_attempts + 1;
         Ok((Exit::Ok, gain))
     }
 }

@@ -73,7 +73,9 @@ def main():
                     case "next":
                         rewards = json.loads(args[1])
                         terms = json.loads(args[2])
-                        runner.next(int(args[0]), rewards, terms)
+                        fbacks = json.loads(args[3])
+                        top_prune = json.loads(args[4])
+                        runner.next(int(args[0]), rewards, terms, fbacks, top_prune)
                     case "step_eval":
                         tree = json.loads(args[2])
                         itm, prob = runner.step_eval(int(args[0]), tree)
@@ -81,7 +83,8 @@ def main():
                     case "next_eval":
                         rewards = json.loads(args[1])
                         terms = json.loads(args[2])
-                        runner.next_eval(int(args[0]), rewards, terms)
+                        fbacks = json.loads(args[3])
+                        runner.next_eval(int(args[0]), rewards, terms, fbacks)
                     case "train":
                         runner.train(int(args[0]))
                     case "save":
@@ -89,13 +92,15 @@ def main():
                     case "load":
                         runner.load(args[0], int(args[1]))
                     case "tmode":
-                        runner.agent.train()
+                        runner.t()
                     case "emode":
-                        runner.agent.eval()
+                        runner.e()
                     case "rs":
                         runner.rs(float(args[0]), int(args[1]), int(args[2]))
                     case "plot":
                         runner.plot(float(args[0]), float(args[1]), float(args[2]), float(args[3]))
+                    case "plot_eval":
+                        runner.plot(0.0, 0.0, float(args[0]), float(args[1]))
                     case "dir":
                         connection.sendall(f"{runner.args.save_dir}/{runner.run_name}".encode('utf-8'))
                     case "opts":

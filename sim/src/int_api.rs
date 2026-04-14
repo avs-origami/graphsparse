@@ -243,7 +243,6 @@ impl Sim {
                                 win.update().unwrap();
                             }
                         },
-                        CmdDrawTree(_) => (),
                         // CmdDrawTree => {
                         //     let ans: Vec<u32> = cmd[2..cmd[1] as usize + 1]
                         //         .iter()
@@ -449,7 +448,7 @@ impl Sim {
                         if *point == GREEN {
                             let mut around = vec![];
                             for n in 0..win.buf.len() {
-                                if is_agent(n as i32, idx as i32, 1) {
+                                if n == idx {
                                     around.push(n);
                                 }
                             }
@@ -594,7 +593,7 @@ impl SimApi for Sim {
         let (tx, rx) = mpsc::channel();
         self.queue.lock().unwrap().push_back(CmdReq::from_req(r, tx));
         let res = rx.recv()?;
-        let res = res.iter().map(|x| (*x).as_()).collect();
+        let res = res.into_iter().map(|x| x.as_()).collect();
         Ok(res)
     }
 }

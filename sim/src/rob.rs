@@ -50,7 +50,7 @@ impl Robot {
 
     /// Get the pixels in the FB that are in the robot's FOV.
     pub fn fov(&self) -> Vec<usize> {
-        let mut pix = vec![];
+        // let mut pix = vec![];
         let mut angle_range = (
             (self.facing - (PI / 3.0)),
             (self.facing + (PI / 3.0)),
@@ -61,10 +61,30 @@ impl Robot {
             angle_range.1 += 2.0 * PI;
         }
 
-        let range_low = coords((self.x - VIEW_DIST) as u32, (self.y + VIEW_DIST) as u32);
-        let range_high = coords((self.x + VIEW_DIST) as u32, (self.y - VIEW_DIST) as u32);
-        for i in range_low..range_high {
-            let cart = (inv_coords(i).0 as f32, inv_coords(i).1 as f32);
+        // let range_low = coords((self.x - VIEW_DIST) as u32, (self.y + VIEW_DIST) as u32);
+        // let range_high = coords((self.x + VIEW_DIST) as u32, (self.y - VIEW_DIST) as u32);
+        // for i in range_low..range_high {
+        //     let cart = (inv_coords(i).0 as f32, inv_coords(i).1 as f32);
+        //     let dy = cart.1 - self.y;
+        //     let dx = cart.0 - self.x;
+        //     let mut angle = dy.atan2(dx);
+            
+        //     if dy < 0.0 || angle_range.1 > 2.0 * PI {
+        //         angle += 2.0 * PI;
+        //     }
+
+        //     if dist(cart, (self.x, self.y)) <= VIEW_DIST
+        //         && angle >= angle_range.0
+        //         && angle <= angle_range.1
+        //     {
+        //         pix.push(i as usize);
+        //     }
+        // }
+
+        // return pix;
+
+        return util::gen_circle(self.pnt32(), VIEW_DIST as u32).into_iter().filter(|i| {
+            let cart = (inv_coords(*i as u32).0 as f32, inv_coords(*i as u32).1 as f32);
             let dy = cart.1 - self.y;
             let dx = cart.0 - self.x;
             let mut angle = dy.atan2(dx);
@@ -73,15 +93,10 @@ impl Robot {
                 angle += 2.0 * PI;
             }
 
-            if dist(cart, (self.x, self.y)) <= VIEW_DIST
+            dist(cart, (self.x, self.y)) <= VIEW_DIST
                 && angle >= angle_range.0
                 && angle <= angle_range.1
-            {
-                pix.push(i as usize);
-            }
-        }
-
-        return pix;
+        }).collect();
     }
 
     /// Move forward one step.

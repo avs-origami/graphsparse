@@ -163,16 +163,19 @@ pub fn goto(
     sml.cmd(Rot(theta.to_degrees()))?;
 
     let mut success = true;
-    for _ in 0..r.round() as usize {
+    for i in 0..r.round() as usize {
         sml.cmd(Step)?;
-        // Update the obstacle space
-        sml.cmd(Ping)?;
-        *map = sml.req(Pixbuf)?;
 
-        // If line of sight is no longer satisfied, break
-        if !lsc(&*map, current.pnt32(), dest.pnt32(), 2) {
-            success = false;
-            break;
+        if i % (sim::VIEW_DIST as usize - 4) == (sim::VIEW_DIST as usize - 5) {
+            // Update the obstacle space
+            sml.cmd(Ping)?;
+            *map = sml.req(Pixbuf)?;
+
+            // If line of sight is no longer satisfied, break
+            if !lsc(&*map, current.pnt32(), dest.pnt32(), 2) {
+                success = false;
+                break;
+            }
         }
     }
 

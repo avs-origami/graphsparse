@@ -55,12 +55,12 @@ impl Rect {
         for i in self.coords.1 .. self.coords.1 + self.height {
             for j in self.coords.0 .. self.coords.0 + self.width {
                 if i <= H32 && j <= W32 {
-                    pix.push(coords(j, i));
+                    pix.push(coords(j, i) as usize);
                 }
             }
         }
 
-        return pix.iter().map(|x| *x as usize).collect::<Vec<usize>>();
+        return pix;
     }
 
     pub fn to_coords(&self) -> Vec<Pnt> {
@@ -79,16 +79,16 @@ impl Rect {
         let mut pix = vec![];
 
         for i in self.coords.0 .. self.coords.0 + self.width {
-            pix.push((i, self.coords.1));
-            pix.push((i, self.coords.1 + self.height));
+            pix.push((i as f32, self.coords.1 as f32));
+            pix.push((i as f32, self.coords.1 as f32 + self.height as f32));
         }
 
         for i in self.coords.1 .. self.coords.1 + self.height {
-            pix.push((self.coords.0, i));
-            pix.push((self.coords.0 + self.width, i));
+            pix.push((self.coords.0 as f32, i as f32));
+            pix.push((self.coords.0 as f32 + self.width as f32, i as f32));
         }
 
-        return pix.iter().map(|x| (x.0 as f32, x.1 as f32)).collect();
+        return pix;
     }
 
     pub fn to_border_lines(&self) -> Vec<(Pnt, Pnt)> {
@@ -523,20 +523,21 @@ pub fn gen_line(a: Pnt32, b: Pnt32, width: usize) -> Vec<usize> {
 }
 
 pub fn gen_circle(p: Pnt32, r: u32) -> Vec<usize> {
-    let mut circle = vec![];
+    // let mut circle = vec![];
     let area = Rect {
         coords: (p.0 - r, p.1 - r),
         width: 2 * r,
         height: 2 * r,
     };
 
-    for i in area.to_fb() {
-        if dist(inv_coords_f32(i as u32), (p.0 as f32, p.1 as f32)) <= r as f32 {
-            circle.push(i);
-        }
-    }
+    // for i in area.to_fb() {
+    //     if dist(inv_coords_f32(i as u32), (p.0 as f32, p.1 as f32)) <= r as f32 {
+    //         circle.push(i);
+    //     }
+    // }
 
-    return circle;
+    // return circle;
+    return area.to_fb().into_iter().filter(|i| dist(inv_coords_f32(*i as u32), (p.0 as f32, p.1 as f32)) <= r as f32).collect();
 }
 
 pub fn tuple_type<In, Out: From<In>>(input: (In, In)) -> (Out, Out) {

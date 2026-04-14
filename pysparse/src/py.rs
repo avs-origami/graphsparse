@@ -111,9 +111,9 @@ impl Bridge {
         Ok((sj::from_str(x)?, sj::from_str(y)?))
     }
 
-    pub fn next(&mut self, step: usize, reward: f32, term: bool) -> Result<()> {
+    pub fn next(&mut self, step: usize, reward: f32, term: bool, feedback: f32, top_prune: Vec<[f32; 2]>) -> Result<()> {
         // print_time!("py.next");
-        let _ = self.cmd(format!("next|{step}|[{reward}]|[{}]", term as i32))?;
+        let _ = self.cmd(format!("next|{step}|[{reward}]|[{}]|[{feedback}]|{top_prune:?}", term as i32))?;
         Ok(())
     }
 
@@ -125,8 +125,8 @@ impl Bridge {
         Ok((sj::from_str(x)?, sj::from_str(y)?))
     }
 
-    pub fn next_eval(&mut self, step: usize, reward: f32, term: bool) -> Result<()> {
-        let _ = self.cmd(format!("next_eval|{step}|[{reward}]|[{}]", term as i32))?;
+    pub fn next_eval(&mut self, step: usize, reward: f32, term: bool, feedback: f32) -> Result<()> {
+        let _ = self.cmd(format!("next_eval|{step}|[{reward}]|[{}]|[{feedback}]", term as i32))?;
         Ok(())
     }
 
@@ -168,6 +168,10 @@ impl Bridge {
 
     pub fn plot(&mut self, r: f32, c: f32, er: f32, ec: f32) -> Result<()> {
         let _ = self.cmd(format!("plot|{r}|{c}|{er}|{ec}"))?;
+        Ok(())
+    }
+    pub fn plot_eval(&mut self, er: f32, ec: f32) -> Result<()> {
+        let _ = self.cmd(format!("plot_eval|{er}|{ec}"))?;
         Ok(())
     }
 

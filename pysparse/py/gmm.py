@@ -9,7 +9,6 @@ from typing import Callable, Tuple
 
 from config import DEV, info
 from nets import LinHead
-from utils import initialize_gmm_components_with_noise, initialize_flat_gmm
 
 
 class GMMHead(nn.Module):
@@ -25,9 +24,9 @@ class GMMHead(nn.Module):
         # # Component weights
         # self.weight_net = LinHead("actor", d_input, d_hidden, num_hidden, num_components)
 
-        self.mean_std = nn.Parameter(torch.zeros(1, num_components, 2))
-        self.logstd_std = nn.Parameter(torch.zeros(1, num_components, 2))
-        self.weights_std = nn.Parameter(torch.zeros(1, num_components))
+        self.mean_std = nn.Parameter(torch.zeros(1, num_components, 2) - 2)
+        self.logstd_std = nn.Parameter(torch.zeros(1, num_components, 2) - 2)
+        self.weights_std = nn.Parameter(torch.zeros(1, num_components) - 2)
 
         self.num_components = num_components
 
@@ -58,7 +57,7 @@ class GMMHead(nn.Module):
         out_layer.weight.data.zero_()
 
 
-    def forward(self, x: Tensor, stochastic: bool = True) -> Tuple[Tensor, Tensor, Tensor, Normal, Normal, Normal]:
+    def forward(self, x: Tensor, stochastic: bool = True) -> Tuple[Tensor, Tensor, Tensor, Tensor, Normal, Normal, Normal]:
         # Get means (constrained to [0,1] range)
         thingy = self.mean_net(x)
         means = torch.sigmoid(thingy[..., :(self.num_components * 2)])
@@ -68,14 +67,16 @@ class GMMHead(nn.Module):
         # Get log standard deviations (with constraints)
         logstds = thingy[..., (self.num_components * 2):(self.num_components * 4)]
         # info(logstds.shape)
-        logstds = (torch.sigmoid(logstds) * 3.5) - 4.0 # Constrain reasonable range
+        logstds = (3.5 * torch.sigmoid(logstds)) - 4.0 # Constrain reasonable range [-4.0, -0.5]
         logstds = logstds.view(-1, self.num_components, 2)
+        # logstds = torch.zeros([x.size(0), self.num_components, 2]).to(DEV) - 3.5
         
         # Get component weights
         # TODO: sigmoid this???
-        weights_logits = thingy[..., (self.num_components * 4):(self.num_components * 5)]
-        # info(weights_logits)
-        # info(weights_logits.shape)
+        weights_logits = torch.sigmoid(thingy[..., (self.num_components * 4):(self.num_components * 5)] + 2.0)
+        
+        # weights_logits = torch.ones([x.size(0), self.num_components]).to(DEV)
+        # info("WL", weights_logits.shape)
         mean_dist = Normal(means, self.mean_std.expand_as(means).exp())
         logstd_dist = Normal(logstds, self.logstd_std.expand_as(logstds).exp())
         weights_dist = Normal(weights_logits, self.weights_std.expand_as(weights_logits).exp())
@@ -84,11 +85,8 @@ class GMMHead(nn.Module):
             means = mean_dist.sample()
             logstds = logstd_dist.sample()
             weights_logits = weights_dist.sample()
-            # info(weights_logits)
 
-        weights_logits = torch.where(weights_logits < -1, -1e10, weights_logits)
-        # info(weights_logits)
-        return means, logstds, weights_logits, mean_dist, logstd_dist, weights_dist
+        return means, logstds, weights_logits, thingy, mean_dist, logstd_dist, weights_dist
 
 
 def find_maximum_probability_point(mixture, resolution=200):
@@ -205,3 +203,131 @@ class GaussMix:
             entropies.append(weighted_entropy)
         
         return torch.stack(entropies)
+
+ 
+def initialize_flat_gmm(num_components=8):
+    """
+    Initialize GMM to approximate a flat (uniform) distribution across the environment.
+    
+    Args:
+        num_components: Number of GMM components to use
+        
+    Returns:
+        means, logstds, weights_logits: Initial GMM parameters
+    """
+    # Arrange components in a grid to cover the space evenly
+    grid_size = int(math.ceil(math.sqrt(num_components)))
+    
+    # Calculate spacing between components
+    spacing = 1.0 / grid_size
+    
+    means = torch.zeros(num_components, 2)
+    
+    # Position components evenly
+    idx = 0
+    for i in range(grid_size):
+        for j in range(grid_size):
+            if idx < num_components:
+                # Center of each grid cell
+                means[idx, 0] = spacing * (j + 0.5)
+                means[idx, 1] = spacing * (i + 0.5)
+                idx += 1
+    
+    # Set wide standard deviations to create overlap
+    # The standard deviation should be large enough to create significant overlap
+    # but not so large that it extends far beyond neighboring components
+    std_value = spacing * 0.75  # This creates substantial overlap
+    stds = torch.ones(num_components, 2) * std_value
+    logstds = torch.log(stds)
+    
+    # Equal weights for all components
+    weights = torch.ones(num_components) / num_components
+    weights_logits = torch.log(weights)
+    
+    return means, logstds, weights_logits
+
+def initialize_gmm_components(num_components=8):
+    """
+    Initialize GMM components to evenly cover the environment space.
+    Places each component in a different sector with appropriate means, stds, and weights.
+    """
+    # Determine grid layout (2x4 grid for 8 components)
+    grid_h, grid_w = 2, 4
+    
+    # Calculate cell size
+    cell_h, cell_w = 1.0/grid_h, 1.0/grid_w
+    
+    # Initialize tensor for means
+    means = torch.zeros(num_components, 2)
+    
+    # Set means to the center of each grid cell
+    component_idx = 0
+    for i in range(grid_h):
+        for j in range(grid_w):
+            # Center of this grid cell
+            center_x = (j + 0.5) * cell_w
+            center_y = (i + 0.5) * cell_h
+            
+            # Set the mean for this component
+            means[component_idx, 0] = center_x
+            means[component_idx, 1] = center_y
+            
+            component_idx += 1
+    
+    # Initialize standard deviations - make them proportional to cell size
+    # but not too large to avoid excessive overlap
+    stds = torch.ones(num_components, 2) * min(cell_w, cell_h) * 0.3
+    logstds = torch.log(stds)
+    
+    # Initialize weights to be equal
+    weights = torch.ones(num_components) / num_components
+    weights_logits = torch.log(weights)
+    
+    return means, logstds, weights_logits
+
+def initialize_gmm_components_with_noise(num_components=8, noise_scale=0.05, std_size=0.3):
+    """Initialize GMM with slight noise around sector centers"""
+    pwr = math.log2(num_components)
+    grid_h, grid_w = int(2 ** (pwr // 2)), int(2 ** (pwr // 2))
+    if pwr % 2 != 0:
+        grid_w *= 2
+
+    info(grid_h, grid_w)
+    
+    cell_h, cell_w = 1.0/grid_h, 1.0/grid_w
+    
+    means = torch.zeros(num_components, 2)
+    
+    component_idx = 0
+    for i in range(grid_h):
+        for j in range(grid_w):
+            # Center of this grid cell
+            center_x = (j + 0.5) * cell_w
+            center_y = (i + 0.5) * cell_h
+            
+            # Add small random noise
+            center_x += torch.randn(1).item() * noise_scale * cell_w
+            center_y += torch.randn(1).item() * noise_scale * cell_h
+            
+            # Clamp to ensure it stays in the right sector
+            center_x = max(j * cell_w + 0.1 * cell_w, min((j+1) * cell_w - 0.1 * cell_w, center_x))
+            center_y = max(i * cell_h + 0.1 * cell_h, min((i+1) * cell_h - 0.1 * cell_h, center_y))
+            
+            # Set the mean for this component
+            means[component_idx, 0] = center_x
+            means[component_idx, 1] = center_y
+            
+            component_idx += 1
+    
+    # Initialize standard deviations - vary slightly for each component
+    stds = torch.ones(num_components, 2) * min(cell_w, cell_h) * std_size
+    stds *= (1 + torch.randn(num_components, 2) * 0.1)  # Add 10% variation
+    logstds = torch.log(stds)
+    
+    # Initialize weights with slight variation
+    weights = torch.ones(num_components) / num_components
+    weights *= (1 + torch.randn(num_components) * 0.1).clamp(0.5, 1.5)  # Add variation
+    weights = weights / weights.sum()  # Normalize
+    weights_logits = torch.log(weights)
+    
+    return means, logstds, weights_logits

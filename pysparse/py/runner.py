@@ -19,6 +19,7 @@ from torchvision import transforms
 
 from config import DEV, info
 from ppo import Agent, Args
+# from welford import WelfordNorm
 
 class Runner:
     def __init__(self, args: Args):
@@ -43,10 +44,10 @@ class Runner:
                 save_code=True,
             )
 
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        torch.backends.cudnn.deterministic = args.torch_deterministic
+        # random.seed(args.seed)
+        # np.random.seed(args.seed)
+        # torch.manual_seed(args.seed)
+        # torch.backends.cudnn.deterministic = args.torch_deterministic
 
         self.agent = Agent(args).to(DEV)
         self.optimizer = optim.AdamW(self.agent.parameters(), lr=args.lr, eps=1e-5)
@@ -58,9 +59,13 @@ class Runner:
         self.dones = torch.zeros((args.num_steps, args.num_envs)).to(DEV)
         self.values = torch.zeros((args.num_steps, args.num_envs)).to(DEV)
 
+        # self.ctx_act = torch.zeros((args.num_steps, args.num_envs, args.num_gauss * 2)).to(DEV)
+        # self.ctx_rew = torch.zeros((args.num_steps, args.num_envs)).to(DEV)
+
         self.param_mean = torch.zeros((args.num_steps, args.num_envs, args.num_gauss, 2)).to(DEV)
         self.param_std = torch.zeros((args.num_steps, args.num_envs, args.num_gauss, 2)).to(DEV)
         self.param_weight = torch.zeros((args.num_steps, args.num_envs, args.num_gauss)).to(DEV)
+        self.param_sincos = torch.zeros((args.num_steps, args.num_envs, 2)).to(DEV)
 
         self.global_step = 0
         self.start_time = time.time()
@@ -74,6 +79,14 @@ class Runner:
         self.next_obs = torch.stack(images, dim=0).to(DEV)
         self.eval_obs = torch.stack(images, dim=0).to(DEV)
         self.next_done = torch.zeros(args.num_envs).to(DEV)
+
+        # self.last_action = torch.zeros((1, args.num_gauss * 2)).to(DEV)
+        # self.last_reward = torch.zeros((1)).to(DEV)
+
+        # self.last_action_eval = torch.zeros((1, args.num_gauss * 2)).to(DEV)
+        # self.last_reward_eval = torch.zeros((1)).to(DEV)
+
+        # self.welford = WelfordNorm(1)
 
         info(f"Parameters: {sum(p.numel() for p in self.agent.parameters() if p.requires_grad) / 1_000_000}M")
         info(f"  GTrXL: {sum(p.numel() for p in self.agent.gtrxl.parameters() if p.requires_grad) / 1_000_000}M")
@@ -92,22 +105,41 @@ class Runner:
 
         # ALGO LOGIC: action logic
         with torch.no_grad():
-            action, params, gmm, logprob, ent, value = self.agent.get_action_and_value(self.next_obs)
+            _, params, gmm, logprob, ent, value = self.agent.get_action_and_value(self.next_obs)
             # info(params[0].shape, params[1].shape, params[2].shape, logprob.shape, value.shape)
             self.values[step] = value.flatten()
+            # info(params[0].shape)
             self.param_mean[step] = params[0]
             self.param_std[step] = params[1]
             self.param_weight[step] = params[2]
+            self.param_sincos[step] = params[3]
             # self.actions[step] = action
             self.logprobs[step] = logprob
             # print(logprob.shape)
+            # info(self.ctx_act[step].shape)
+            # info(self.last_action.shape)
+            # self.ctx_act[step] = self.last_action.unsqueeze(0)
+            # self.ctx_rew[step] = self.last_reward.unsqueeze(0)
+
+        def jitter(x: torch.Tensor, sincos: torch.Tensor) -> torch.Tensor:
+            sincos = sincos.clamp(-1, 1)
+            s, d = (sincos[0][0], sincos[0][1])
+            return (
+                s * (x + d).sin().abs() +
+                (s + 0.2) * (x + (d + 0.2)).cos().abs() +
+                (s + 0.4) * (x + (d + 0.2)).sin().abs() +
+                (s + 0.6) * (x + (d + 0.2)).cos().abs()
+            ).sum(-1)
 
         if self.global_step % 200 == 0:
-            img = self.next_obs
+            # info("visualizing")
+            img = self.next_obs.clone()
+            _, dparams, dgmm, _, _, _ = self.agent.get_action_and_value(self.next_obs, stoch=False)
             # Use the 2D visualization instead of 3D
             self.agent.viz_3d(
-                params,
+                dparams,
                 gmm,
+                lambda x: 5e-2 * 50 * jitter(x, params[3]),
                 image_tensor=img,
                 step=self.global_step,
                 save_path=f"{self.args.save_dir}/{self.run_name}/viz"
@@ -116,6 +148,15 @@ class Runner:
         # need to return probs for each (x, y) coord
         coords = torch.tensor(list(tree.values())).to(DEV).unsqueeze(0)
         probs = gmm.log_prob(coords).to(DEV).exp()
+        
+        probs += 1e-3 * jitter(coords, params[3])
+
+        # dists = torch.cdist(params[0].squeeze(0), coords.squeeze(0))
+        # close_idxs = torch.argmin(dists, dim=-1)
+        # means = coords.squeeze(0)[close_idxs].unsqueeze(0)
+        # self.param_mean[step] = means
+        # self.logprobs[step] = self.agent.get_logprobs(md, params[0])
+
         # action.squeeze_(0)
         return ([int(num) for num in list(tree.keys())], probs.squeeze(0).tolist())
     
@@ -123,13 +164,13 @@ class Runner:
     def step_eval(self, step: int, tree: dict) -> Tuple[list[int], list[float]]:
         """Just eval the model."""
         with torch.no_grad():
-            action, params, gmm, logprob, ent, value = self.agent.get_action_and_value(self.eval_obs, stoch=False)
+            _, _, gmm, _, _, _ = self.agent.get_action_and_value(self.eval_obs, stoch=False)
             coords = torch.tensor(list(tree.values())).to(DEV).unsqueeze(0)
             probs = gmm.log_prob(coords).to(DEV).exp()
             return ([int(num) for num in list(tree.keys())], probs.squeeze(0).tolist())
     
     
-    def next(self, step: int, rewards: List[float], terms: List[bool]):
+    def next(self, step: int, rewards: list[float], terms: list[bool], fbacks: list[float], top_prune: list[list[float]]):
         """Collect remaining experience info after robot has taken an action in Rust."""
 
         images = []
@@ -141,9 +182,18 @@ class Runner:
         self.next_obs = torch.stack(images, dim=0).to(DEV)
         self.next_done = torch.tensor(terms).to(DEV).view(-1)
         self.rewards[step] = torch.tensor(rewards).to(DEV).view(-1)
+        # self.last_reward = torch.tensor(fbacks).to(DEV).view(-1)
+        # info(torch.tensor(top_prune).unsqueeze(0).shape)
+
+        # tetris = torch.tensor(top_prune).unsqueeze(0).to(DEV)
+        # self.param_mean[step] = torch.where(tetris != 0, tetris, self.param_mean[step])
+
+        # if terms[0]:
+        #     self.last_reward = torch.zeros_like(self.last_reward)
+        #     self.last_action = torch.zeros_like(self.last_action)
 
 
-    def next_eval(self, step: int, rewards: List[float], terms: List[bool]):
+    def next_eval(self, step: int, rewards: list[float], terms: list[bool], fbacks: list[float]):
         images = []
         for i in range(self.args.num_envs):
             image = Image.open(f"{i+1}.png")
@@ -151,6 +201,11 @@ class Runner:
             images.append(transform(image))#[0].unsqueeze(0))
 
         self.eval_obs = torch.stack(images, dim=0).to(DEV)
+        # self.last_reward_eval = torch.tensor(fbacks).to(DEV).view(-1)
+
+        # if terms[0]:
+        #     self.last_reward_eval = torch.zeros_like(self.last_reward_eval)
+        #     self.last_action_eval = torch.zeros_like(self.last_action_eval)
 
 
     def train(self, iteration: int):
@@ -183,11 +238,15 @@ class Runner:
         b_means = self.param_mean.reshape((-1, self.args.num_gauss, 2))
         b_stds = self.param_std.reshape((-1, self.args.num_gauss, 2))
         b_weights = self.param_weight.reshape((-1, self.args.num_gauss))
+        b_sincos = self.param_sincos.reshape((-1, 2))
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = self.values.reshape(-1)
 
-        # info(b_obs.shape, b_logprobs.shape, b_means.shape, b_stds.shape, b_weights.shape, b_advantages.shape, b_returns.shape, b_values.shape)
+        # b_ctx_act = self.ctx_act.reshape((-1, self.args.num_gauss * 2))
+        # b_ctx_rew = self.ctx_rew.reshape(-1)
+
+        info(b_obs.shape, b_logprobs.shape, b_means.shape, b_stds.shape, b_weights.shape, b_advantages.shape, b_returns.shape, b_values.shape)#, b_ctx_act.shape, b_ctx_rew.shape)
 
         # Optimizing the policy and value network
         b_inds = np.arange(self.args.batch_size)
@@ -200,7 +259,14 @@ class Runner:
                 end = start + self.args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                _, _, _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(b_obs[mb_inds], (b_means[mb_inds], b_stds[mb_inds], b_weights[mb_inds]))
+                _, _, _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(
+                    b_obs[mb_inds],
+                    # (b_ctx_act[mb_inds], b_ctx_rew[mb_inds].unsqueeze(-1)),
+                    action=(b_means[mb_inds], b_stds[mb_inds], b_weights[mb_inds], b_sincos[mb_inds]),
+                )
+
+                # newlogprob = self.agent.get_logprobs(newmd, b_means[mb_inds])
+
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
                 # info(b_obs[mb_inds].shape, b_means[mb_inds].shape, b_stds[mb_inds].shape, b_weights[mb_inds].shape, newlogprob.shape, entropy.shape, newvalue.shape, ratio.shape)
@@ -268,9 +334,9 @@ class Runner:
         self.writer.add_scalar("rewards/coverage", c, self.global_step)
         self.writer.add_scalar("rewards/eval_rewards", er, self.global_step)
         self.writer.add_scalar("rewards/eval_coverage", ec, self.global_step)
+
         if self.args.test:
             self.global_step += 1
-
 
     def save(self):
         """Save the model."""
@@ -290,3 +356,11 @@ class Runner:
     def rs(self, amt: float, start: int, end: int):
         """Scale rewards for a simulation based on final coverage achieved."""
         self.rewards[start : end] += amt
+
+    def t(self):
+        self.agent.train()
+        # self.welford.train()
+
+    def e(self):
+        self.agent.eval()
+        # self.welford.eval()

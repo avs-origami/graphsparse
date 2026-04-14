@@ -9,179 +9,28 @@ from torch.distributions import MixtureSameFamily, MultivariateNormal, Categoric
 from mpl_toolkits.mplot3d import Axes3D
 import os
 
-from config import info
+from config import info, DEV
+from gmm import GaussMix
 
-def initialize_flat_gmm(num_components=8):
-    """
-    Initialize GMM to approximate a flat (uniform) distribution across the environment.
-    
-    Args:
-        num_components: Number of GMM components to use
-        
-    Returns:
-        means, logstds, weights_logits: Initial GMM parameters
-    """
-    # Arrange components in a grid to cover the space evenly
-    grid_size = int(math.ceil(math.sqrt(num_components)))
-    
-    # Calculate spacing between components
-    spacing = 1.0 / grid_size
-    
-    means = torch.zeros(num_components, 2)
-    
-    # Position components evenly
-    idx = 0
-    for i in range(grid_size):
-        for j in range(grid_size):
-            if idx < num_components:
-                # Center of each grid cell
-                means[idx, 0] = spacing * (j + 0.5)
-                means[idx, 1] = spacing * (i + 0.5)
-                idx += 1
-    
-    # Set wide standard deviations to create overlap
-    # The standard deviation should be large enough to create significant overlap
-    # but not so large that it extends far beyond neighboring components
-    std_value = spacing * 0.75  # This creates substantial overlap
-    stds = torch.ones(num_components, 2) * std_value
-    logstds = torch.log(stds)
-    
-    # Equal weights for all components
-    weights = torch.ones(num_components) / num_components
-    weights_logits = torch.log(weights)
-    
-    return means, logstds, weights_logits
-
-def initialize_gmm_components(num_components=8):
-    """
-    Initialize GMM components to evenly cover the environment space.
-    Places each component in a different sector with appropriate means, stds, and weights.
-    """
-    # Determine grid layout (2x4 grid for 8 components)
-    grid_h, grid_w = 2, 4
-    
-    # Calculate cell size
-    cell_h, cell_w = 1.0/grid_h, 1.0/grid_w
-    
-    # Initialize tensor for means
-    means = torch.zeros(num_components, 2)
-    
-    # Set means to the center of each grid cell
-    component_idx = 0
-    for i in range(grid_h):
-        for j in range(grid_w):
-            # Center of this grid cell
-            center_x = (j + 0.5) * cell_w
-            center_y = (i + 0.5) * cell_h
-            
-            # Set the mean for this component
-            means[component_idx, 0] = center_x
-            means[component_idx, 1] = center_y
-            
-            component_idx += 1
-    
-    # Initialize standard deviations - make them proportional to cell size
-    # but not too large to avoid excessive overlap
-    stds = torch.ones(num_components, 2) * min(cell_w, cell_h) * 0.3
-    logstds = torch.log(stds)
-    
-    # Initialize weights to be equal
-    weights = torch.ones(num_components) / num_components
-    weights_logits = torch.log(weights)
-    
-    return means, logstds, weights_logits
-
-def initialize_gmm_components_with_noise(num_components=8, noise_scale=0.05, std_size=0.3):
-    """Initialize GMM with slight noise around sector centers"""
-    pwr = math.log2(num_components)
-    grid_h, grid_w = int(2 ** (pwr // 2)), int(2 ** (pwr // 2))
-    if pwr % 2 != 0:
-        grid_w *= 2
-
-    info(grid_h, grid_w)
-    
-    cell_h, cell_w = 1.0/grid_h, 1.0/grid_w
-    
-    means = torch.zeros(num_components, 2)
-    
-    component_idx = 0
-    for i in range(grid_h):
-        for j in range(grid_w):
-            # Center of this grid cell
-            center_x = (j + 0.5) * cell_w
-            center_y = (i + 0.5) * cell_h
-            
-            # Add small random noise
-            center_x += torch.randn(1).item() * noise_scale * cell_w
-            center_y += torch.randn(1).item() * noise_scale * cell_h
-            
-            # Clamp to ensure it stays in the right sector
-            center_x = max(j * cell_w + 0.1 * cell_w, min((j+1) * cell_w - 0.1 * cell_w, center_x))
-            center_y = max(i * cell_h + 0.1 * cell_h, min((i+1) * cell_h - 0.1 * cell_h, center_y))
-            
-            # Set the mean for this component
-            means[component_idx, 0] = center_x
-            means[component_idx, 1] = center_y
-            
-            component_idx += 1
-    
-    # Initialize standard deviations - vary slightly for each component
-    stds = torch.ones(num_components, 2) * min(cell_w, cell_h) * std_size
-    stds *= (1 + torch.randn(num_components, 2) * 0.1)  # Add 10% variation
-    logstds = torch.log(stds)
-    
-    # Initialize weights with slight variation
-    weights = torch.ones(num_components) / num_components
-    weights *= (1 + torch.randn(num_components) * 0.1).clamp(0.5, 1.5)  # Add variation
-    weights = weights / weights.sum()  # Normalize
-    weights_logits = torch.log(weights)
-    
-    return means, logstds, weights_logits
-
-def visualize_gmm_3d_on_image(means, logstds, weights, image_tensor, samples=None, title="GMM Distribution", save_path=None):
+def visualize_gmm_3d_on_image(gmm: GaussMix, jitter: callable, image_tensor: torch.Tensor, samples=None, title="GMM Distribution", save_path=None):
     """
     Visualize the GMM distribution in 3D overlaid on the input image.
     """
-    # Convert to numpy for matplotlib
-    if isinstance(means, torch.Tensor):
-        means = means.detach().cpu().numpy()
-    if isinstance(logstds, torch.Tensor):
-        logstds = logstds.detach().cpu().numpy()
-    if isinstance(weights, torch.Tensor):
-        # Make sure weights are properly converted from logits to probabilities
-        weights = torch.softmax(weights, dim=0).detach().cpu().numpy()
-    
-    # For debugging, print the actual components
-    # print("Means shape:", means.shape)
-    # print("Means:", means)
-    # print("LogStds:", np.exp(logstds))  # Print actual standard deviations, not logs
-    # print("Weights (after softmax):", weights)
-    
-    # Extract image dimensions
-    if len(image_tensor.shape) == 4:
-        image_tensor = image_tensor[0]  # Take first batch if batched
+    image_tensor.squeeze_(0)
     _, height, width = image_tensor.shape
-    
-    # Create the component distributions
-    component_means = torch.tensor(means, dtype=torch.float32)
-    component_covs = torch.diag_embed(torch.tensor(np.exp(logstds) ** 2, dtype=torch.float32))
-    component_weights = torch.tensor(weights, dtype=torch.float32)
-    
     # Create higher resolution grid for visualization
-    resolution = 300  # Higher resolution for better visualization
+    resolution = 500  # Higher resolution for better visualization
     x = np.linspace(0, 1, resolution)
     y = np.linspace(0, 1, resolution)
     X, Y = np.meshgrid(x, y)
-    positions = torch.tensor(np.column_stack([X.ravel(), Y.ravel()]), dtype=torch.float32)
-    
-    # Create the mixture distribution (similar to how it's done in the model)
-    component_distribution = MultivariateNormal(loc=component_means, scale_tril=torch.diag_embed(torch.exp(torch.tensor(logstds))))
-    mixture_distribution = Categorical(probs=component_weights)  # Using properly normalized weights
-    gmm = MixtureSameFamily(mixture_distribution=mixture_distribution, component_distribution=component_distribution)
+    positions = torch.tensor(np.column_stack([X.ravel(), Y.ravel()]), dtype=torch.float32).unsqueeze(0)
+    # info(positions.shape)
     
     # Evaluate log probabilities and convert to probabilities
-    Z = gmm.log_prob(positions).detach().cpu().numpy()
-    Z = np.exp(Z).reshape(X.shape)
+    Z = gmm.log_prob(positions.to(DEV)).detach().cpu().numpy()
+    # info(Z.shape)
+    Z = np.exp(Z) + jitter(positions.to(DEV) * 250).cpu().numpy()
+    Z = Z.reshape(X.shape)
     
     # Find the peak for verification
     max_idx = np.argmax(Z)
