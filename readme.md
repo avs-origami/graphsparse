@@ -36,6 +36,8 @@ This project presents a transformer-based framework trained with Proximal Policy
 - `rrt_lib/` -- implementation of the RRT algorithm
 - `tensorviz/` -- utility for visualizing tensors as colorful heatmaps in the terminal
 
+Additionally, the code for experiments introducing trigonometric noise to the GMM probabilities can be found in the [`trig_noise` branch](https://github.com/avs-origami/graphsparse/tree/trig_noise?tab=readme-ov-file).
+
 ### Setup and training
 
 #### Requirements
