@@ -21,6 +21,8 @@
   </tr>
 </table>
 
+## ⚠️ Note: this is the branch for experiments introducing trigonometric noise to the GMM probabilities. For the main experiments, see the [`main` branch](https://github.com/avs-origami/graphsparse/tree/main?tab=readme-ov-file).
+
 ### Overview
 
 This project presents a transformer-based framework trained with Proximal Policy Optimization (PPO) to prune dynamic graphs used in autonomous robotic exploration algorithms. Despite performance bottlenecks, our approach maintains important structural features of the exploration graph and improves the consistency of exploration across highly varied environments while reducing the size of the exploration graph by 96%.
