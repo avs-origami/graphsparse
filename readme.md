@@ -1,6 +1,6 @@
 ## Learning-Based Sparsification of Dynamic Graphs in Robotic Exploration Algorithms
 
-<a href="https://arxiv.org/abs"><img src="https://img.shields.io/badge/arXiv-Preprint-b31b1b"></a>
+<a href="https://arxiv.org/abs/2604.16509"><img src="https://img.shields.io/badge/arXiv-Preprint-b31b1b"></a>
 
 <table>
   <tr>
@@ -79,11 +79,12 @@ This code was primarily developed and tested on Arch Linux, so some system softw
 
 ```
 @misc{sastry2026graphsparse,
-  title={Learning-Based Sparsification of Dynamic Graphs in Robotic Exploration Algorithms},
-  author={Sastry, Adithya V. and Poudel, Bibek and Li, Weizi},
+  title={Learning-Based Sparsification of Dynamic Graphs in Robotic Exploration Algorithms}, 
+  author={Adithya V. Sastry and Bibek Poudel and Weizi Li},
   year={2026},
-  eprint={},
+  eprint={2604.16509},
   archivePrefix={arXiv},
-  primaryClass={cs.LG},
-  url={https://arxiv.org/abs/},
+  primaryClass={cs.RO},
+  url={https://arxiv.org/abs/2604.16509}, 
 }
+```
