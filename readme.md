@@ -1,4 +1,4 @@
-## Learning-Based Sparsification of Dynamic Graphs in Robotic Exploration Algorithms
+## Learning-Guided Sparsification of Dynamic Graphs in Robotic Exploration
 
 <a href="https://arxiv.org/abs/2604.16509"><img src="https://img.shields.io/badge/arXiv-Preprint-b31b1b"></a>
 
@@ -23,7 +23,7 @@
 
 ### Overview
 
-This project presents a transformer-based framework trained with Proximal Policy Optimization (PPO) to prune dynamic graphs used in autonomous robotic exploration algorithms. Despite performance bottlenecks, our approach maintains important structural features of the exploration graph and improves the consistency of exploration across highly varied environments while reducing the size of the exploration graph by 96%.
+This project presents a transformer-based framework trained with Proximal Policy Optimization (PPO) to prune dynamic graphs used in autonomous robotic exploration algorithms. Our approach improves exploration efficiency by up to 2.1 percentage points and improves runtimes by up to 2x, and generalizes to highly varied and complex environments and long-horizon exploration tasks, while reducing the size of the exploration graph by 96%.
 
 ![System diagram](demo/system_diagram.png)
 
@@ -78,13 +78,13 @@ This code was primarily developed and tested on Arch Linux, so some system softw
 ## Citation
 
 ```
-@misc{sastry2026graphsparse,
-  title={Learning-Based Sparsification of Dynamic Graphs in Robotic Exploration Algorithms}, 
-  author={Adithya V. Sastry and Bibek Poudel and Weizi Li},
-  year={2026},
-  eprint={2604.16509},
-  archivePrefix={arXiv},
-  primaryClass={cs.RO},
-  url={https://arxiv.org/abs/2604.16509}, 
+@misc{sastry2026graphsparse
+      title={Learning-Guided Sparsification of Dynamic Graphs in Robotic Exploration}, 
+      author={Adithya V. Sastry and Bibek Poudel and Weizi Li},
+      year={2026},
+      eprint={2604.16509},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2604.16509}, 
 }
 ```
