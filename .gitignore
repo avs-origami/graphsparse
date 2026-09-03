@@ -41,7 +41,11 @@ exps*
 tensorviz/build
 tensorviz/dist
 tensorviz/tensorviz.egg-info
-/learning_curves
-/scrot
-/flamegraph.svg
-/flamepy.svg
+docs/
+results/
+CLAUDE.md
+misc/
+scrot/
+.nvenv/
+.ovenv/
+learning_curves/

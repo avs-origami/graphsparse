@@ -9,8 +9,11 @@ use crate::colors::*;
 use crate::rob::{Robot, VIEW_DIST};
 use crate::env::{Clutter, Env};
 
+const CARVE: f32 = 21.0;
+
 pub struct Win {
     pub buf: Vec<u32>,
+    pub toplayer: Vec<u32>,
     pub win: Option<Window>,
     pub rob: Robot,
     pub env: Env,
@@ -21,6 +24,7 @@ impl Win {
     pub fn new_window(start: Pnt, scale: minifb::Scale, c: Clutter, seed: Option<u64>) -> Result<Self> {
         let mut me = Self {
             buf: vec![0; WIDTH * HEIGHT],
+            toplayer: vec![0; WIDTH * HEIGHT],
             win: Some(Window::new(
                 "Robot Simulator",
                 WIDTH,
@@ -41,7 +45,7 @@ impl Win {
         for block in &me.env.obs {
             for i in block.to_fb() {
                 if i >= me.buf.len() { continue; }
-                if dist(inv_coords_f32(i as u32), me.rob.pnt()) < 40.0 { continue; }
+                if dist(inv_coords_f32(i as u32), me.rob.pnt()) < CARVE { continue; }
                 me.buf[i] = DPURPLE;
             }
         }
@@ -58,6 +62,7 @@ impl Win {
     pub fn new_headless(start: Pnt, c: Clutter, seed: Option<u64>) -> Result<Self> {
         let mut me = Self {
             buf: vec![0; WIDTH * HEIGHT],
+            toplayer: vec![0; WIDTH * HEIGHT],
             win: None,
             rob: Robot::new(start),
             env: Env::new(c, seed),
@@ -68,7 +73,7 @@ impl Win {
         for block in &me.env.obs {
             for i in block.to_fb() {
                 if i >= me.buf.len() { continue; }
-                if dist(inv_coords_f32(i as u32), me.rob.pnt()) < 40.0 { continue; }
+                if dist(inv_coords_f32(i as u32), me.rob.pnt()) < CARVE { continue; }
                 me.buf[i] = DPURPLE;
             }
         }
@@ -82,8 +87,12 @@ impl Win {
     }
 
     pub fn update(&mut self) -> Result<()> {
+        let fbc = self.rob.fb_coords();
+        let fov = self.rob.fov();
+        let rp32 = self.rob.pnt32();
+
         for (n, i) in self.buf.iter_mut().enumerate() {
-            if is_agent(n as i32, self.rob.fb_coords() as i32, 1)
+            if n as u32 == fbc
                 && *i != GREEN
                 && *i != DPURPLE
                 && *i != BLUE
@@ -104,13 +113,13 @@ impl Win {
             // }
         }
 
-        for i in self.rob.fov() {
+        for i in fov {
             if self.buf[i] != GREEN
                 && self.buf[i] != DPURPLE
                 && self.buf[i] != BLUE
                 && self.buf[i] != RED
             {
-                let line = util::gen_line(self.rob.pnt32(), inv_coords(i as u32), 1);
+                let line = util::gen_line(rp32, inv_coords(i as u32), 1);
                 if !line.iter().any(|x| self.buf[*x] == DPURPLE) {
                     self.buf[i] = YELLOW;
                 }
@@ -119,9 +128,30 @@ impl Win {
 
         // lines_test(&mut self.buf);
 
-        if let Some(ref mut x) = self.win { x.update_with_buffer(&self.buf, WIDTH, HEIGHT)?; }
+        // If we have a visualization active, any color pixels in the toplayer get rendered over the
+        // main simulation pixbuf. Doesn't affect the simulation state, purely visual.
+        if let Some(ref mut x) = self.win {
+            if self.toplayer.iter().any(|p| *p != 0) {
+                let out: Vec<u32> = self.buf.iter().zip(&self.toplayer)
+                    .map(|(b, t)| if *t != 0 { *t } else { *b })
+                    .collect();
+                x.update_with_buffer(&out, WIDTH, HEIGHT)?;
+            } else {
+                x.update_with_buffer(&self.buf, WIDTH, HEIGHT)?;
+            }
+        }
 
         Ok(())
+    }
+
+    /// Replace the overlay layer with `pix`.
+    pub fn overlay(&mut self, pix: Vec<u32>) {
+        self.toplayer = pix;
+    }
+
+    /// Clear the overlay layer.
+    pub fn erase_overlay(&mut self) {
+        self.toplayer = vec![0; WIDTH * HEIGHT];
     }
 
     /// Draw some pixels to the buffer

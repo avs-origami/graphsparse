@@ -29,3 +29,7 @@ rayon = "1.10.0"
 [[bin]]
 name = "sim_no_win"
 path = "src/main_no_win.rs"
+
+[[bin]]
+name = "spicy_reach"
+path = "src/spicy_reach.rs"

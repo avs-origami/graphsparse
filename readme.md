@@ -23,7 +23,7 @@
 
 ### Overview
 
-This project presents a transformer-based framework trained with Proximal Policy Optimization (PPO) to prune dynamic graphs used in autonomous robotic exploration algorithms. Our approach improves exploration efficiency by up to 2.1 percentage points and improves runtimes by up to 2x, and generalizes to highly varied and complex environments and long-horizon exploration tasks, while reducing the size of the exploration graph by 96%.
+This project presents a transformer-based framework trained with Proximal Policy Optimization (PPO) to prune dynamic graphs used in autonomous robotic exploration algorithms. Our approach improves exploration efficiency by up to 2.1 percentage points and boosts runtimes by up to 2x, and generalizes to highly varied and complex environments and long-horizon exploration tasks, while reducing the size of the exploration graph by 96%.
 
 ![System diagram](demo/system_diagram.png)
 
@@ -36,21 +36,21 @@ This project presents a transformer-based framework trained with Proximal Policy
 - `rrt_lib/` -- implementation of the RRT algorithm
 - `tensorviz/` -- utility for visualizing tensors as colorful heatmaps in the terminal
 
-Additionally, the code for experiments introducing trigonometric noise to the GMM probabilities can be found in the [`trig_noise` branch](https://github.com/avs-origami/graphsparse/tree/trig_noise?tab=readme-ov-file).
+DEPRECATED: the code for experiments introducing trigonometric noise to the GMM probabilities can be found in the [`trig_noise` branch](https://github.com/avs-origami/graphsparse/tree/trig_noise?tab=readme-ov-file). However, these results are no longer presented in the current version of the paper. They are preserved here regardless for curiosity and since these experiments are briefly referenced in Appendix A, section D.
 
 ### Setup and training
 
 #### Requirements
-- Rust 1.86.0 (recommended to use [rustup](https://rust-lang.org/tools/install/))
-- Python 3.14
+- Rust 1.96.0 (recommended to use [rustup](https://rust-lang.org/tools/install/))
+- Python 3.14.2
 - GCC 15.2.1
 - CUDA 13.1
 
 #### Setup
-Create and activate a python virtualenv at `.venv`:
+Create and activate a python virtualenv at `.nvenv`:
 ```bash
-python -m venv .venv  # must either use this location or change it in pysparse.sh
-source .venv/bin/activate
+python -m nvenv .nvenv  # must either use this location or change it in pysparse.sh
+source .nvenv/bin/activate
 ```
 
 Install required python packages:

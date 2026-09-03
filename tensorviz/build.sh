@@ -1,5 +1,5 @@
 #!/bin/sh -e
 
-source ../.venv/bin/activate
+source ../.nvenv/bin/activate
 cd ../tensorviz
 python setup.py install

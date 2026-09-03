@@ -5,6 +5,7 @@ import dataclasses
 import os
 import random
 import time
+import threading
 from dataclasses import dataclass, fields
 from typing import Callable, Optional, Tuple
 
@@ -123,6 +124,9 @@ class Args:
 
     num_gauss: int = 8
     """Number of gaussian components for GMM"""
+
+    activation: str = "ReLU"
+    """Activation function for linear heads."""
     
     # =========================================
     # ========   PPO Hyperparameters   ========
@@ -265,17 +269,37 @@ class Agent(nn.Module):
             mem_len=args.gtrxl_mem_len
         )
 
+        # Per-token compression from GTrXL d_model to d_comp.
         self.comp = nn.Sequential(
             nn.Linear(args.d_model, args.d_comp * 4),
+            getattr(nn, args.activation)(),
             nn.Linear(args.d_comp * 4, args.d_comp),
+            nn.LayerNorm(args.d_comp),
         )
 
-        self.critic = LinHead("critic", args.d_comp * 100, args.hidden_size, args.num_hidden, 1).to(DEV)
-        self.gauss = GMMHead(args.d_comp * 100, args.hidden_size, args.num_hidden, args.num_gauss).to(DEV)
+        self.critic = LinHead("critic", args.d_comp * 100, args.hidden_size, args.num_hidden, 1, args.activation).to(DEV)
+        self.gauss = GMMHead(args.d_comp * 100, args.hidden_size, args.num_hidden, args.num_gauss, args.activation).to(DEV)
 
         self.stochastic = (args.stochastic == "On")
 
-    def tform(self, x: Tensor) -> Tensor:
+        # GTrXL memory. Follows the same implementation from the (now defunct)
+        # C++ version of this code. Only updated when `batch == 1` (i.e. rollout
+        # single-step forward), so PPO minibatch updates (batch=minibatch_size)
+        # read the current memory state (via broadcasting across the batch dim)
+        # without mutating it. Memory rolls forward within `mem_len` without
+        # resetting between episodes.
+        self.gtrxl_memory: list[Tensor] | None = None
+        self.gtrxl_memory = self.gtrxl.init_memory(device=DEV)
+        self.eval_memory: list[Tensor] | None = None
+        self.eval_memory = self.gtrxl.init_memory(device=DEV)
+
+    def reset_mem(self):
+        self.gtrxl_memory = self.gtrxl.init_memory(device=DEV)
+
+    def reset_eval_mem(self):
+        self.eval_memory = self.gtrxl.init_memory(device=DEV)
+
+    def tform(self, x: Tensor, target: str = "gtrxl_memory", update_mem: bool = True, mem_override=None) -> Tensor:
         # Split the input image (3x250x250) into 100 patches (3x25x25)
         patches = self.patch.forward(x)
         pdim = patches.shape
@@ -290,21 +314,41 @@ class Agent(nn.Module):
         # Convert the patches to tokens (positional embeddings are applied here
         # as well).
         tokens = self.token.forward(patches)
-        # global PREV
-        # if PREV is not None and tokens.shape[0] == 1:
-        #     tviz(tokens.squeeze(0) - PREV.squeeze(0))
-        #     print()
-        
-        # if tokens.shape[0] != 1:
-        #     PREV = None
-        # else:
-        #     PREV = tokens
-        
+
+        # tokens.permute(1, 0, 2) has shape [n_patches, batch, d_model].
+        inputs = tokens.permute(1, 0, 2)
+        cur_batch = inputs.size(1)
+
+        # Two paths:
+        #
+        # Rollout / eval / GAE-bootstrap forward (batch=1 or read-only):
+        # `mem_override is None`. Use the attribute-backed memory named by
+        # `target` and update the GTrXL internal memory.
+        #
+        # PPO minibatch forward (batch>1): `mem_override` is a list of
+        # per-layer tensors of shape (mem_len, cur_batch, d), one per
+        # sample, snapshotted at the rollout timestep that sample came
+        # from. We save the memory from each rollout timestep and feed it
+        # back in here to ensure correctness. The update does not mutate
+        # the rollout's stored memory or the GTrXL's internal memory.
+        if mem_override is not None:
+            mem_in = mem_override
+        else:
+            mem = getattr(self, target)
+            if mem is None or mem[0].device != inputs.device:
+                mem = self.gtrxl.init_memory(device=inputs.device)
+                setattr(self, target, mem)
+            mem_in = mem
 
         # Pass the tokens through the GTrXL.
-        tform: dict[str, Tensor] = self.gtrxl.forward(tokens.permute(1, 0, 2))
+        tform: dict[str, Tensor] = self.gtrxl.forward(inputs, memory=mem_in)
         out = tform["logits"]  # Shape: [n_patches, batch, d_model]
         out = out.permute(1, 0, 2)
+
+        # Only persist memory back if we're in the rollout single-batch case
+        # AND the caller allowed it AND we weren't given an override.
+        if mem_override is None and cur_batch == 1 and update_mem:
+            setattr(self, target, [m.detach() for m in tform["memory"]])
 
         # Compress the size of each token.
         batch = out.size(0)
@@ -316,11 +360,13 @@ class Agent(nn.Module):
         return out
 
     def get_value(self, x):
-        out = self.tform(x)
+        # GAE bootstrap: read memory but don't advance it.
+        out = self.tform(x, update_mem=False)
         return self.critic(out.flatten(1))
 
-    def get_action_and_value(self, x: Tensor, action: tuple[Tensor, Tensor, Tensor] | None = None, stoch=None):
-        out = self.tform(x)
+    def get_action_and_value(self, x: Tensor, action: tuple[Tensor, Tensor, Tensor] | None = None, stoch=None, eval: bool = False, mem_override=None):
+        target = "eval_memory" if eval else "gtrxl_memory"
+        out = self.tform(x, target=target, mem_override=mem_override)
         if stoch is not None:
             if not stoch:
                 # tensorhue.viz(x.cpu()[0][0] + x.cpu()[0][1] + x.cpu()[0][2])
@@ -335,7 +381,7 @@ class Agent(nn.Module):
             means, logstds, weights_logits, md, ld, wd = self.gauss.forward(out.flatten(1), stochastic=stoch)
             if not stoch:
                 global PREV
-                if PREV is not None:
+                if PREV is not None and self.args.dbg:
                     tviz((means.squeeze(0) - PREV[0].squeeze(0)).t())
                     tviz((logstds.squeeze(0) - PREV[1].squeeze(0)).t())
                     tviz(weights_logits - PREV[2])
@@ -351,14 +397,18 @@ class Agent(nn.Module):
         gmm_list = []
         
         for i in range(batch_size):
+            mlogstds = logstds.clone()
+            mlogstds[..., 0] = torch.where(weights_logits < 0.5, 13, mlogstds[..., 0])
+            mlogstds[..., 1] = torch.where(weights_logits < 0.5, 13, mlogstds[..., 1])
+            mweights_logits = torch.where(weights_logits < 0.5, -1e10, weights_logits)
             # Create component distribution
             component_dist = MultivariateNormal(
                 loc=means[i],
-                scale_tril=torch.diag_embed(torch.exp(logstds[i]))
+                scale_tril=torch.diag_embed(torch.exp(mlogstds[i]))
             )
             
             # Create mixture distribution 
-            mixture_dist = Categorical(logits=weights_logits[i])
+            mixture_dist = Categorical(logits=mweights_logits[i])
             
             # Create the GMM
             gmm = MixtureSameFamily(
@@ -381,29 +431,26 @@ class Agent(nn.Module):
         params = (means, logstds, weights_logits)
         return action, params, gmm, log_prob, entropy, self.critic.forward(out.flatten(1))
     
-    def viz_3d(self, params: Tuple[Tensor, Tensor, Tensor, Normal, Normal, Normal], gmm: GaussMix, image_tensor, step=0, save_path=None):
+    def viz_3d(self, params: tuple[Tensor, Tensor, Tensor, Normal, Normal, Normal], gmm: GaussMix, image_tensor, step=0, save_path=None, suffix=""):
         """Create a 3D visualization of the GMM PDF overlaid on the input image."""
         with torch.no_grad():
-            out = self.tform(image_tensor).flatten(1)
-            params = self.gauss.forward(out, stochastic=False)
-            # Convert to numpy for visualization
-            means_np = params[0].reshape(-1, self.args.num_gauss, 2)[0].cpu()
-            logstds_np = params[1].reshape(-1, self.args.num_gauss, 2)[0].cpu()
-            weights_np = params[2].reshape(-1, self.args.num_gauss)[0].cpu()
-            
             # Save visualization
-            if save_path:
-                os.makedirs(save_path, exist_ok=True)
+            def thing():
+                plt.switch_backend('agg')
+                if save_path:
+                    os.makedirs(save_path, exist_ok=True)
+                    
+                fig = visualize_gmm_3d_on_image(
+                    gmm,
+                    image_tensor,
+                    # samples=greedy_sample_np,
+                    title=f"GMM Distribution at step {step}",
+                    save_path=f"{save_path}/gmm_3d_overlay_{step}{suffix}.png" if save_path else None
+                )
                 
-            fig = visualize_gmm_3d_on_image(
-                means_np, 
-                logstds_np, 
-                weights_np,
-                image_tensor,
-                # samples=greedy_sample_np,
-                title=f"GMM Distribution at step {step}",
-                save_path=f"{save_path}/gmm_3d_overlay_{step}.png" if save_path else None
-            )
-            
-            if not save_path:
-                return fig
+                if not save_path:
+                    return fig
+                
+            t = threading.Thread(target=thing)
+            t.start()
+            # thing()

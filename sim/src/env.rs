@@ -26,11 +26,17 @@ impl Env {
     }
 
     pub fn gen_obs(&mut self) {
+        if let Clutter::Spicy = self.c {
+            crate::spicy::gen_obs(&mut self.rng, &mut self.obs);
+            return;
+        }
+
         let (lo, hi) = match self.c {
             Clutter::Low => (3.0 * SF32, 4.0 * SF32),
             Clutter::Mid => (8.0 * SF32, 16.0 * SF32),
-            Clutter::High => (17.0 * SF32, 23.0 * SF32),
+            Clutter::High => (20.0 * SF32, 23.0 * SF32),
             Clutter::Nah => (3.0 * SF32, 23.0 * SF32),
+            Clutter::Spicy => unreachable!(),
         };
 
         for _ in 0..self.rng.gen_range(lo as usize..hi as usize) {
@@ -91,4 +97,5 @@ pub enum Clutter {
     Mid,
     High,
     Nah,
+    Spicy,
 }

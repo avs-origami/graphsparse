@@ -130,12 +130,9 @@ impl SimApi for Sim {
             Cmd::Reset => vec![CmdType::Reset.float(), 0.0],
             Cmd::Done => vec![CmdType::Done.float(), 0.0],
             Cmd::Ping => vec![CmdType::Undef.float(), 0.0],
-            Cmd::DrawTree(_) => vec![],
-            // Cmd::DrawTree2(x) => {
-            //     let mut cmd = vec![CmdType::DrawTree2.float(), x.len() as f32];
-            //     for i in x { cmd.push(util::coords(i.pnt32().0, i.pnt32().1) as f32); }
-            //     cmd
-            // },
+            // Shmem transport doesn't carry the 250x250 tree overlay; ignored
+            // over this channel. The in-process int_api.rs implements it.
+            Cmd::DrawTree(_) => vec![CmdType::Undef.float(), 0.0],
         };
 
         let mut inn = self.inner.lock().unwrap();

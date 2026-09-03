@@ -140,7 +140,7 @@ impl Bridge {
         Ok(())
     }
 
-    pub fn load(&mut self, name: &str, checkpoint: usize) -> Result<()> {
+    pub fn load(&mut self, name: &str, checkpoint: &str) -> Result<()> {
         let _ = self.cmd(format!("load|{name}|{checkpoint}"))?;
         Ok(())
     }
@@ -166,8 +166,23 @@ impl Bridge {
         Ok(())
     }
 
+    pub fn b(&mut self) -> Result<()> {
+        let _ = self.cmd(format!("boundary"))?;
+        Ok(())
+    }
+
+    pub fn eb(&mut self) -> Result<()> {
+        let _ = self.cmd(format!("eboundary"))?;
+        Ok(())
+    }
+
     pub fn plot(&mut self, r: f32, c: f32, er: f32, ec: f32) -> Result<()> {
         let _ = self.cmd(format!("plot|{r}|{c}|{er}|{ec}"))?;
+        Ok(())
+    }
+
+    pub fn plot_eval(&mut self, er: f32, ec: f32) -> Result<()> {
+        let _ = self.cmd(format!("plot_eval|{er}|{ec}"))?;
         Ok(())
     }
 

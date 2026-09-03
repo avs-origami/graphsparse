@@ -19,6 +19,7 @@ pub mod win;
 pub mod rob;
 pub mod shmem_sim;
 pub mod stats;
+pub mod spicy;
 
 use args::Args;
 use colors::*;

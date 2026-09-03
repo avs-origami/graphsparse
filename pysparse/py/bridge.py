@@ -87,15 +87,23 @@ def main():
                     case "save":
                         runner.save()
                     case "load":
-                        runner.load(args[0], int(args[1]))
+                        runner.load(args[0], args[1])
                     case "tmode":
                         runner.agent.train()
+                        runner.welford.train()
                     case "emode":
                         runner.agent.eval()
+                        runner.welford.eval()
+                    case "boundary":
+                        runner.boundary()
+                    case "eboundary":
+                        runner.eboundary()
                     case "rs":
                         runner.rs(float(args[0]), int(args[1]), int(args[2]))
                     case "plot":
                         runner.plot(float(args[0]), float(args[1]), float(args[2]), float(args[3]))
+                    case "plot_eval":
+                        runner.plot(0.0, 0.0, float(args[0]), float(args[1]))
                     case "dir":
                         connection.sendall(f"{runner.args.save_dir}/{runner.run_name}".encode('utf-8'))
                     case "opts":

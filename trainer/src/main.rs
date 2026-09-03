@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::BufWriter;
@@ -27,9 +28,14 @@ lazy_static::lazy_static! {
     static ref HOST: Cow<'static, str> = HOST_OS.to_string_lossy();
 }
 
+pub const ALPHA: f32 = 5.0;
+pub const BETA: f32 = 240.0;
+
 fn randpoint() -> Pnt {
-    ((random::<f32>() * 230.0).round() + 10.0, (random::<f32>() * 230.0).round() + 10.0)
-    // (2.0, 2.0)
+    // ((random::<f32>() * 230.0).round() + 10.0, (random::<f32>() * 230.0).round() + 10.0)
+    // ((random::<f32>() * 40.0).round() + 105.0, (random::<f32>() * 40.0).round() + 105.0)
+    // (10.0, 10.0)
+    (132.0, 36.0)
 }
 
 fn randprune(tree: &Tree) -> (Vec<usize>, Vec<f32>) {
@@ -47,9 +53,9 @@ fn randprune(tree: &Tree) -> (Vec<usize>, Vec<f32>) {
 }
 
 fn main() -> Result<()>  {
-    let mut py = Bridge::new(GlobalOpts::from_cli())?;
-    let (mut rithm, mut sim_thread) = RrtInc::new(Some(randpoint()), GlobalOpts::from_cli())?;
-    let (mut rithm_eval, mut sim_thread_eval) = RrtInc::new(Some(randpoint()), GlobalOpts::from_cli())?;
+    let mut py = Bridge::new(GlobalOpts::parse())?;
+    let (mut rithm, mut sim_thread) = RrtInc::new(Some(randpoint()), GlobalOpts::parse())?;
+    let (mut rithm_eval, mut sim_thread_eval) = RrtInc::new(Some(randpoint()), GlobalOpts::parse())?;
     let mut rewards = vec![];
     let mut covs = vec![];
     let mut eval_rewards = vec![];
@@ -59,7 +65,27 @@ fn main() -> Result<()>  {
     export_state(&mut rithm, &mut vec![0; WIDTH * HEIGHT], 0);
 
     py.send_opts(&rithm.opts)?;
-    // py.load("ppo_1749067947", 160)?;
+
+    if let Some(ref x) = rithm.opts.load {
+        if x.len() == 2 {
+            py.load(&x[0], &x[1])?;
+        } else if x.len() == 1 {
+            let highest = std::fs::read_dir(format!("{}/{}", &rithm.opts.save_dir, &x[0]))?
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file())
+                .filter_map(|path| {
+                    let filename = path.file_name()?.to_str()?;
+                    let num_str = filename.strip_prefix("ppo")?.strip_suffix(".pt")?;
+                    let num = num_str.parse::<u32>().ok()?;
+                    Some((num, path))
+                }).max_by_key(|(num, _path)| *num);
+
+            py.load(&x[0], highest.unwrap().1.file_name().unwrap().to_str().unwrap().strip_suffix(".pt").unwrap())?;
+        } else {
+            panic!("Bad argument for --load")
+        }
+    }
 
     let run_dir = py.get_dir()?;
     let run_name = run_dir.split('/').last().unwrap();
@@ -77,23 +103,27 @@ fn main() -> Result<()>  {
 
         if i % 1 == 0 {
             py.e()?;
-            collect_eval(&mut rithm_eval, &mut py, &mut eval_rewards, &mut eval_covs, &mut sim_thread_eval)?;
-            // draw_chart(&eval_rewards, &format!("learning_curves/{}.{run_name}.rewards_eval", *HOST))?;
-            // draw_chart(&eval_covs, &format!("learning_curves/{}.{run_name}.coverage_eval", *HOST))?;
-            eprintln!("Episode {}: Average eval reward: {}", i, eval_rewards[eval_rewards.len() - 1]);
-            eprintln!("Episode {}: Average eval coverage: {}", i, eval_covs[eval_covs.len() - 1]);
+            let n = rithm.opts.num_eval.max(1);
+            let mut tmp_r = vec![];
+            let mut tmp_c = vec![];
+            for _ in 0..n { collect_eval(&mut rithm_eval, &mut py, &mut tmp_r, &mut tmp_c, &mut sim_thread_eval)?; }
+            eval_rewards.push(tmp_r.iter().sum::<f32>() / n as f32);
+            eval_covs.push(tmp_c.iter().sum::<f32>() / n as f32);
+            draw_chart(&eval_rewards, &format!("learning_curves/{}.{run_name}.rewards_eval", *HOST))?;
+            draw_chart(&eval_covs, &format!("learning_curves/{}.{run_name}.coverage_eval", *HOST))?;
+            eprintln!("Episode {}: Average eval reward over {n} runs: {}", i, eval_rewards[eval_rewards.len() - 1]);
+            eprintln!("Episode {}: Average eval coverage over {n} runs: {}", i, eval_covs[eval_covs.len() - 1]);
             py.t()?;
         }
 
         if ! rithm.opts.test {
             py.plot(rewards[rewards.len() - 1], covs[covs.len() - 1], eval_rewards[eval_rewards.len() - 1], eval_covs[eval_covs.len() - 1])?;
         } else {
-            py.plot(0.0, 0.0, eval_rewards[eval_rewards.len() - 1], eval_covs[eval_covs.len() - 1])?;
+            py.plot_eval(eval_rewards[eval_rewards.len() - 1], eval_covs[eval_covs.len() - 1])?;
         }
     }
 
     // Randomize the robot's starting location to remove the bias caused by starting in the same corner all the time
-    // Experiments: random pruning, cluster pruning
 
     py.cmd("done".into())?;
     #[allow(deprecated)]
@@ -138,36 +168,89 @@ fn collect_rollout(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, 
 
         // Gets the probabilities of each node using the GMM
         let pvec = py.step(i, &rithm.rrt.tree)?;
-        let mut tups = pvec.0.iter().zip(pvec.1).map(|(x, y)| (x, y)).collect::<Vec<_>>();
-        tups.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        let mut tups = pvec.0.into_par_iter().zip(pvec.1).map(|(x, y)| (x, y)).collect::<Vec<_>>();
+        tups.par_sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        tups.retain(|(idx, _)| *idx != rithm.current.idx);
         // eprintln!("{:?}", &tups);
 
         // Determine how many nodes to prune. Tree growth is more or less linear
         // so we aim to reduce the growth rate -- essentially, calculating the
         // number of nodes to prune based on the current slope of tree growth.
         let num_prune = rithm.opts.prune_frac * (rithm.rrt.len() - prev_len) as f32;
-        for i in 0..num_prune as usize {
-            let idx = tups[i].0;
+        let pf = num_prune as f32 / rithm.rrt.tree.len() as f32;
 
-            if rithm.frontiers.contains(&rithm.rrt.tree[idx]) {
-                node_rewards.push(-1.0);
-            } else {
-                node_rewards.push(1.0);
-            }
-
-            rithm.rrt.del(*idx);
+        let mut pats = HashMap::new();
+        for n in tups.iter() {
+            let pnt = rithm.rrt.tree[&n.0].pnt32();
+            let bin = (pnt.0 / 25, pnt.1 / 25);
+            pats.entry(bin).and_modify(|x: &mut Vec<(usize, f32)>| x.push(*n)).or_insert(vec![*n]);
         }
 
+        for (_, bin) in pats.iter() {
+            let np = pf * bin.len() as f32;
+            for i in 0..np as usize {
+                let idx = bin[i].0;
+                // let mut nr = 0.0;
+
+                // if rithm.frontiers.contains(&rithm.rrt.tree[&idx]) {
+                //     nr -= 1.0;
+                // } else {
+                //     nr += 1.0;
+                // }
+
+                // if *rithm.rrt.tree[&idx].num_child.lock().unwrap() == 1 {
+                //     nr += 1.0;
+                // } else {
+                //     nr -= 1.0;
+                // }
+
+                // // nr -= util::dist(centroid, rithm.rrt.tree[idx].pnt()) / 175.0;
+
+                // node_rewards.push(nr);
+                rithm.rrt.del(idx);
+            }
+        }
+
+        // for i in 0..num_prune as usize {
+        //     let idx = tups[i].0;
+        //     let mut nr = 0.0;
+
+        //     if rithm.frontiers.contains(&rithm.rrt.tree[&idx]) {
+        //         nr -= 1.0;
+        //     } else {
+        //         nr += 1.0;
+        //     }
+
+        //     if *rithm.rrt.tree[&idx].num_child.lock().unwrap() == 1 {
+        //         nr += 1.0;
+        //     } else {
+        //         nr -= 1.0;
+        //     }
+
+        //     // nr -= util::dist(centroid, rithm.rrt.tree[idx].pnt()) / 175.0;
+
+        //     node_rewards.push(nr);
+        //     rithm.rrt.del(idx);
+        // }
+
         prev_len = rithm.rrt.len();
+        let mut reg_at = 0;
+        let mut step_n = 0;
 
         'a: while rithm.rrt.len() <= prev_len {
             match rithm.step() {
                 Ok(x) => match x.0 {
-                    Exit::Ok => gain += x.1,
+                    Exit::Ok => {
+                        gain += x.1;
+                        reg_at += rithm.regen_attempts;
+                        step_n += 1;
+                    },
                     Exit::Timeout => {
                         eprintln!("Timed out!");
                         dbg!(rithm.num_visited);
                         gain += x.1;
+                        reg_at += rithm.regen_attempts;
+                        step_n += 1;
                         terminal = true;
                         break 'a;
                     },
@@ -175,6 +258,8 @@ fn collect_rollout(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, 
                         eprintln!("Completed successfully!");
                         dbg!(rithm.num_visited as f32 / rithm.rrt.len() as f32);
                         gain += x.1;
+                        reg_at += rithm.regen_attempts;
+                        step_n += 1;
                         terminal = true;
                         break 'a;
                     }
@@ -194,20 +279,13 @@ fn collect_rollout(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, 
         //     std::process::exit(0);
         // }
 
-        let ac = export_state(rithm, &mut last_buf, 0);
+        export_state(rithm, &mut last_buf, 0);
 
-        reward += reward_fn(node_rewards, rithm.regen_attempts);
+        reward += reward_fn(node_rewards, gain / 100.0, reg_at as f32 / step_n as f32);
 
         if terminal {
-            let reward_scale = match rithm.coverage {
-                x if 0.0 <= x && x < 25.0 => 0.0,
-                x if 25.0 <= x && x < 50.0 => 2.0,
-                x if 50.0 <= x && x < 75.0 => 4.0,
-                x if x >= 75.0 => 8.0,
-                _ => 0.0,
-            };
-
-            reward += reward_scale;
+            let reward_scale = (rithm.coverage / 100.0).exp() - 1.0;
+            reward += BETA * reward_scale;
         }
         // dbg!(reward);
         // env_rewards.push(reward);
@@ -232,6 +310,7 @@ fn collect_rollout(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, 
             rithm.reset(Some(randpoint()), sim_thread)?;
             rithm.step()?;
             export_state(rithm, &mut last_buf, 0);
+            py.b()?;
             prev_len = rithm.rrt.len();
         }
 
@@ -263,9 +342,9 @@ fn collect_eval(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, cov
     let mut last_buf = vec![0; WIDTH * HEIGHT];
 
     export_state(rithm, &mut last_buf, 1);
+    py.eb()?;
 
     let mut cnt = 0;
-    let mut good = false;
 
     'o: for i in 0..rithm.opts.num_moves {
         let mut gain = 0.0;
@@ -280,41 +359,113 @@ fn collect_eval(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, cov
             } else {
                 randprune(&rithm.rrt.tree)
             };
-
-            let mut tups = pvec.0.iter().zip(pvec.1).map(|(x, y)| (x, y)).collect::<Vec<_>>();
-            tups.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            
+            let mut tups = pvec.0.into_par_iter().zip(pvec.1).map(|(x, y)| (x, y)).collect::<Vec<_>>();
+            tups.par_sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            tups.retain(|(idx, _)| *idx != rithm.current.idx);
             // eprintln!("{:?}", &tups);
 
             // Determine how many nodes to prune. Tree growth is more or less linear
             // so we aim to reduce the growth rate -- essentially, calculating the
             // number of nodes to prune based on the current slope of tree growth.
             let num_prune = rithm.opts.prune_frac * (rithm.rrt.len() - prev_len) as f32;
-            for i in 0..num_prune as usize {
-                let idx = tups[i].0;
 
-                if rithm.frontiers.contains(&rithm.rrt.tree[idx]) {
-                    node_rewards.push(-1.0);
-                } else {
-                    node_rewards.push(1.0);
+            if rithm.opts.random {
+                for i in 0..num_prune as usize {
+                    if i >= tups.len() { break; }
+                    let idx = tups[i].0;
+                    // let mut nr = 0.0;
+
+                    // if rithm.frontiers.contains(&rithm.rrt.tree[&idx]) {
+                    //     nr -= 1.0;
+                    // } else {
+                    //     nr += 1.0;
+                    // }
+
+                    // if *rithm.rrt.tree[&idx].num_child.lock().unwrap() == 1 {
+                    //     nr += 1.0;
+                    // } else {
+                    //     nr -= 1.0;
+                    // }
+
+                    // node_rewards.push(nr);
+                    rithm.rrt.del(idx);
+                }
+            } else {
+                let pf = num_prune as f32 / rithm.rrt.tree.len() as f32;
+
+                let mut pats = HashMap::new();
+                for n in tups.iter() {
+                    let pnt = rithm.rrt.tree[&n.0].pnt32();
+                    let bin = (pnt.0 / 25, pnt.1 / 25);
+                    pats.entry(bin).and_modify(|x: &mut Vec<(usize, f32)>| x.push(*n)).or_insert(vec![*n]);
                 }
 
-                rithm.rrt.del(*idx);
+                for (_, bin) in pats.iter() {
+                    let np = pf * bin.len() as f32;
+                    for i in 0..np as usize {
+                        let idx = bin[i].0;
+                        // let mut nr = 0.0;
+
+                        // if rithm.frontiers.contains(&rithm.rrt.tree[&idx]) {
+                        //     nr -= 1.0;
+                        // } else {
+                        //     nr += 1.0;
+                        // }
+
+                        // if *rithm.rrt.tree[&idx].num_child.lock().unwrap() == 1 {
+                        //     nr += 1.0;
+                        // } else {
+                        //     nr -= 1.0;
+                        // }
+
+                        // node_rewards.push(nr);
+                        rithm.rrt.del(idx);
+                    }
+                }
             }
-        } else {
-            node_rewards.push(1.0);
-            node_rewards.push(-1.0);
+
+            // for i in 0..num_prune as usize {
+            //     let idx = tups[i].0;
+            //     let mut nr = 0.0;
+
+            //     if rithm.frontiers.contains(&rithm.rrt.tree[&idx]) {
+            //         nr -= 1.0;
+            //     } else {
+            //         nr += 1.0;
+            //     }
+
+            //     if *rithm.rrt.tree[&idx].num_child.lock().unwrap() == 1 {
+            //         nr += 1.0;
+            //     } else {
+            //         nr -= 1.0;
+            //     }
+
+            //     // nr -= util::dist(centroid, rithm.rrt.tree[idx].pnt()) / 175.0;
+
+            //     node_rewards.push(nr);
+            //     rithm.rrt.del(idx);
+            // }
         }
 
         prev_len = rithm.rrt.len();
+        let mut reg_at = 0;
+        let mut step_n = 0;
 
         'a: while rithm.rrt.len() <= prev_len {
             match rithm.step() {
                 Ok(x) => match x.0 {
-                    Exit::Ok => gain += x.1,
+                    Exit::Ok => {
+                        gain += x.1;
+                        reg_at += rithm.regen_attempts;
+                        step_n += 1;
+                    },
                     Exit::Timeout => {
                         eprintln!("Timed out!");
                         dbg!(rithm.num_visited);
                         gain += x.1;
+                        reg_at += rithm.regen_attempts;
+                        step_n += 1;
                         terminal = true;
                         break 'a;
                     },
@@ -322,14 +473,13 @@ fn collect_eval(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, cov
                         eprintln!("Completed successfully!");
                         dbg!(rithm.num_visited as f32 / rithm.rrt.len() as f32);
                         gain += x.1;
+                        reg_at += rithm.regen_attempts;
+                        step_n += 1;
                         terminal = true;
                         break 'a;
                     }
                 },
-                Err(_) => {
-                    eprintln!("Error!");
-                    break 'o;
-                },
+                Err(_) => break 'o,
             }
         }
 
@@ -344,20 +494,14 @@ fn collect_eval(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, cov
         //     std::process::exit(0);
         // }
 
-        let ac = export_state(rithm, &mut last_buf, 1);
+        export_state(rithm, &mut last_buf, 1);
+        // let pct = ac as f32 / (WIDTH * HEIGHT) as f32;
 
-        reward += reward_fn(node_rewards, rithm.regen_attempts);
+        reward += reward_fn(node_rewards, gain / 100.0, reg_at as f32 / step_n as f32);
 
         if terminal {
-            let reward_scale = match rithm.coverage {
-                x if 0.0 <= x && x < 25.0 => 0.0,
-                x if 25.0 <= x && x < 50.0 => 2.0,
-                x if 50.0 <= x && x < 75.0 => 4.0,
-                x if x >= 75.0 => 8.0,
-                _ => 0.0,
-            };
-
-            reward += reward_scale;
+            let reward_scale = (rithm.coverage / 100.0).exp() - 1.0;
+            reward += BETA * reward_scale;
         }
 
         // dbg!(reward);
@@ -373,16 +517,21 @@ fn collect_eval(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, cov
         }
 
         if terminal {
+            py.eb()?;
             covs.push(rithm.coverage);
-            good = true;
+            // Machine-parseable per-episode summary. `analyze_experiments.py`
+            // greps for this prefix. Keep `key=value` shape stable.
+            if rithm.opts.test { eprintln!(
+                "EVAL_STATS coverage={:.4} initial_coverage={:.4} greg={} moves={} dist={:.2} tree={}",
+                rithm.coverage, rithm.initial_coverage, rithm.greg, rithm.num_visited,
+                rithm.total_dist, rithm.rrt.len(),
+            ); }
             break;
         }
 
-        // pb.inc(1);
-    }
-
-    if ! good {
-        covs.push(rithm.coverage);
+        if rithm.opts.test {
+            pb.inc(rithm.regen_attempts as u64 + 1);
+        }
     }
 
     pb.finish_with_message("Collected experiences");
@@ -391,46 +540,65 @@ fn collect_eval(rithm: &mut RrtInc, py: &mut Bridge, rewards: &mut Vec<f32>, cov
     Ok(())
 }
 
-fn reward_fn(node_rewards: Vec<f32>, reg_at: usize) -> f32 {
-    let mut avg = node_rewards.iter().sum::<f32>() / node_rewards.len() as f32;
+fn reward_fn(node_rewards: Vec<f32>, gain: f32, reg_at: f32) -> f32 {
+    // let mut avg = node_rewards.iter().sum::<f32>() / node_rewards.len() as f32;
 
-    if avg.is_nan() {
-        avg = 0.0;
-    }
+    // if avg.is_nan() {
+    //     avg = 0.0;
+    // }
 
-    return avg - (reg_at as f32 / 5.0);
+    return /*avg*/gain - ALPHA * (reg_at / 100.0) - 2.0;
 }
 
-fn export_state(rithm: &mut RrtInc, last_buf: &mut Vec<u32>, count: usize) -> usize {
+fn export_state(rithm: &mut RrtInc, last_buf: &mut Vec<u32>, count: usize) {//-> (usize, (f32, f32)) {
     // print_time!("export_state");
     // Do we draw the edges? Necessary for visualization, but maybe not necessary for model input?
     let _ = rithm.sml.cmd(Ping);
     let mut buf = rithm.sml.req::<u32>(Pixbuf).unwrap();
     // let mut buf2 = rithm.sml.req::<u32>(PixbufFull).unwrap();
 
-    let alpha: Vec<bool> = buf.iter().zip(last_buf.iter()).map(|(x, y)| x - y > 0).collect();
+    // let alpha: Vec<bool> = buf.iter().zip(last_buf.iter()).map(|(x, y)| x - y > 0).collect();
     // let alpha = vec![false; WIDTH * HEIGHT];
 
-    for (_, node) in &rithm.rrt.tree {
-        // let i = util::coords(node.x as u32, node.y as u32) as usize;
-        // if i < buf.len() { // temporary fix: whats happening?
-        //     if buf[i] != col::RED {
-        //         buf[i] = if rithm.frontiers.contains(node) {0xEEEEEE} else {0xDDDDDD};
-        //         buf2[i] = if rithm.frontiers.contains(node) {0xEEEEEE} else {0xDDDDDD};
-        //     }
-        // }
+    // Separate overlay layer used when --render is on so that we can render the RRT
+    // on top of the rest of the simulation visual.
+    let mut tree_overlay: Vec<u32> = if rithm.opts.render &&! rithm.opts.htree {
+        vec![0; WIDTH * HEIGHT]
+    } else {
+        vec![]
+    };
 
+    for (_, node) in &rithm.rrt.tree {
         if let Some(x) = node.par.lock().unwrap().upgrade() {
-            let l = util::gen_line(node.pnt32(), x.pnt32(), 2);
-            let c = util::gen_circle(node.pnt32(), 2);
+            let l = util::gen_line(node.pnt32(), x.pnt32(), 1);
+            let c = util::gen_circle(node.pnt32(), 1);
             for p in l {
-                if p < buf.len() { if buf[p] != col::RED { buf[p] = col::EDGE; }}
+                if p < buf.len() && buf[p] != col::RED {
+                    buf[p] = col::EDGE;
+                    if rithm.opts.render &&! rithm.opts.htree { tree_overlay[p] = col::EDGE; }
+                }
             }
 
             for p in c {
-                if p < buf.len() { if buf[p] != col::RED { buf[p] = col::NODE; }}
+                if p < buf.len() && buf[p] != col::RED {
+                    buf[p] = col::NODE;
+                    if rithm.opts.render &&! rithm.opts.htree { tree_overlay[p] = col::NODE; }
+                }
             }
         }
+    }
+
+    let poh = buf.iter().position(|&p| p == col::RED);
+    if let Some(pohh) = poh {
+        let r = util::gen_circle(util::inv_coords(pohh as u32), 3);
+        for p in r {
+            buf[p] = col::RED;
+            if rithm.opts.render &&! rithm.opts.htree { tree_overlay[p] = col::RED; }
+        }
+    }
+
+    if rithm.opts.render &&! rithm.opts.htree {
+        let _ = rithm.sml.cmd(sim::int_api::Cmd::DrawTree(tree_overlay));
     }
 
     // let mut bvec = vec![];
@@ -451,38 +619,70 @@ fn export_state(rithm: &mut RrtInc, last_buf: &mut Vec<u32>, count: usize) -> us
     //     buf[*i] = col::BLACK;
     // }
 
-    let fname = format!("{count}.png");
-    let path = Path::new(&fname);
-    let file = File::create(path).unwrap();
-    let ref mut w = BufWriter::new(file);
-    let mut encoder = png::Encoder::new(w, W32, H32);
+    // let fname = format!("{count}.png");
+    // let path = Path::new(&fname);
+    // let file = File::create(path).unwrap();
+    // let ref mut w = BufWriter::new(file);
+    // let mut encoder = png::Encoder::new(w, W32, H32);
 
-    encoder.set_color(png::ColorType::Rgb);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().expect("Writer failure");
-    let mut image = [0; WIDTH * HEIGHT * 3];
-    let mut idx = 0;
+    // encoder.set_color(png::ColorType::Rgb);
+    // encoder.set_depth(png::BitDepth::Eight);
+    // let mut writer = encoder.write_header().expect("Writer failure");
+    // let mut image = [0; WIDTH * HEIGHT * 3];
+    // let mut idx = 0;
 
-    for (i, a) in buf.iter().zip(&alpha) {
-        let mut decoded = [0; 3];
-        let mut hex_str = format!("{:X}", i);
-        let num_zero = 6 - hex_str.len();
+    // for (i, a) in buf.iter().zip(&alpha) {
+    //     let mut decoded = [0; 3];
+    //     let mut hex_str = format!("{:X}", i);
+    //     let num_zero = 6 - hex_str.len();
 
-        for _ in 0..num_zero {
-            hex_str.insert(0, '0');
+    //     for _ in 0..num_zero {
+    //         hex_str.insert(0, '0');
+    //     }
+
+    //     hex::decode_to_slice(hex_str, &mut decoded).expect("Hex decode error");
+    //     for j in decoded {
+    //         image[idx] = j;
+    //         idx += 1;
+    //     }
+
+    //     // if *a { image[idx] = 255; } else { image[idx] = 127; }
+    //     // idx += 1;
+    // }
+
+    // writer.write_image_data(&image).unwrap();
+
+    // New 07-01-2026: reduce latency of transferring state to Python
+    if rithm.opts.img_chan == 3 {
+        let mut rgb = Vec::with_capacity(WIDTH * HEIGHT * 3);
+        for &pixel in &buf {
+            rgb.push(((pixel >> 16) & 0xFF) as u8);
+            rgb.push(((pixel >> 8) & 0xFF) as u8);
+            rgb.push((pixel & 0xFF) as u8);
         }
 
-        hex::decode_to_slice(hex_str, &mut decoded).expect("Hex decode error");
-        for j in decoded {
-            image[idx] = j;
-            idx += 1;
+        std::fs::write(format!("/dev/shm/sim_obs_{count}.bin"), &rgb).expect("image buffer write failed");
+    } else if rithm.opts.img_chan == 1 {
+        // Grayscale the image by selecting values for each color used by the simulation.
+        let mut gray = Vec::with_capacity(WIDTH * HEIGHT);
+        for &pixel in &buf {
+            let v: u8 = match pixel {
+                col::BLACK   => 0,
+                col::EDGE    => 40,
+                col::NODE    => 80,
+                col::LYELLOW => 120,
+                col::YELLOW  => 160,
+                col::DPURPLE => 200,
+                col::RED     => 255,
+                _ => 0,
+            };
+            gray.push(v);
         }
 
-        // if *a { image[idx] = 255; } else { image[idx] = 127; }
-        // idx += 1;
+        std::fs::write(format!("/dev/shm/sim_obs_{count}.bin"), &gray).expect("image buffer write failed");
+    } else {
+        panic!("Error: opts.img_chan must be either 3 or 1.");
     }
-
-    writer.write_image_data(&image).unwrap();
 
     // let fname = format!("img/B{count}.png");
     // let path = Path::new(&fname);
@@ -516,7 +716,12 @@ fn export_state(rithm: &mut RrtInc, last_buf: &mut Vec<u32>, count: usize) -> us
 
     // *last_buf = buf;
 
-    return alpha.iter().filter(|x| **x).count();
+    // let (sx, sy, cnt) = buf.iter().enumerate()
+    //     .filter(|(_, x)|**x != col::BLACK)
+    //     .map(|(i, _)| util::inv_coords_f32(i as u32))
+    //     .fold((0.0, 0.0, 0.0), |(sx, sy, cnt), (x, y)| (sx + x, sy + y, cnt + 1.0));
+
+    // return (alpha.iter().filter(|x| **x).count(), (sx / cnt, sy / cnt));
 }
 
 fn draw_chart(rewards: &Vec<f32>, name: &str) -> Result<()> {

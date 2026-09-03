@@ -10,7 +10,7 @@ mod tests {
     /// Ensure that when the tree is grown, there are no orphans and all
     /// node properties are consistent.
     fn grow_tree() {
-        let mut alg = rrt::Algorithm::new((0.0, 0.0), 1.0, None).unwrap();
+        let mut alg = rrt::Algorithm::new((0.0, 0.0), 1.0, None, false).unwrap();
         let mut rng = thread_rng();
         for _ in 0..1000 {
             alg.gen_node(|_| rng.gen_bool(0.5));
@@ -31,7 +31,7 @@ mod tests {
     /// Ensure that upon removing nodes from the tree, there are no orphans and
     /// all node properties are consistent.
     fn del_node() {
-        let mut alg = rrt::Algorithm::new((0.0, 0.0), 1.0, None).unwrap();
+        let mut alg = rrt::Algorithm::new((0.0, 0.0), 1.0, None, false).unwrap();
         for _ in 0..1000 {
             alg.gen_node(|_| true);
         }

@@ -1,25 +1,25 @@
 // Regular colors
-pub const RED: u32 = 0xFF0000;
-pub const GREEN: u32 = 0x4C5B61;
-pub const BLACK: u32 = 0x000000;
-pub const DPURPLE: u32 = 0xFF00FF;
-pub const YELLOW: u32 = 0xFFFF00;
-pub const LYELLOW: u32 = 0x666666;
-pub const CYAN: u32 = 0x44FFFF;
-pub const BLUE: u32 = 0x00FF01;
+// pub const RED: u32 = 0xFF0000;
+// pub const GREEN: u32 = 0x4C5B61;
+// pub const BLACK: u32 = 0x000000;
+// pub const DPURPLE: u32 = 0xFF00FF;
+// pub const YELLOW: u32 = 0xFFFF00;
+// pub const LYELLOW: u32 = 0x666666;
+// pub const CYAN: u32 = 0x44FFFF;
+// pub const BLUE: u32 = 0x00FF01;
 
 // Special colors
-// pub const RED: u32     = 0xFF_2D_00;
-// pub const DPURPLE: u32 = 0xCC_D5_00;
-// pub const YELLOW: u32  = 0x99_FF_00;
-// pub const LYELLOW: u32 = 0x00_AB_55;
-// pub const BLACK: u32   = 0x00_00_00;
+pub const RED: u32     = 0xFF_2D_00;
+pub const DPURPLE: u32 = 0xCC_D5_00;
+pub const YELLOW: u32  = 0x99_FF_00;
+pub const LYELLOW: u32 = 0x00_AB_55;
+pub const BLACK: u32   = 0x00_00_00;
 pub const NODE: u32    = 0x66_81_FF;
 pub const EDGE: u32    = 0x33_57_AA;
 
-// pub const GREEN: u32 = 0x4C5B61;
-// pub const CYAN: u32 = 0x44FFFF;
-// pub const BLUE: u32 = 0x00FF01;
+pub const GREEN: u32 = 0x4C5B61;
+pub const CYAN: u32 = 0x44FFFF;
+pub const BLUE: u32 = 0x00FF01;
 
 // Grayscale colors
 // pub const RED: u32 = 0x222222;

@@ -351,28 +351,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "gethostname",
- "hex",
- "indicatif",
- "lazy_static",
- "measure_time",
- "plotters",
- "png",
- "pysparse",
- "rand 0.8.5",
- "rayon",
- "rrt_demo",
- "rrt_fast",
- "rrt_lib",
- "sim",
- "util",
-]
-
-[[package]]
 name = "derive-where"
 version = "1.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1410,28 +1388,6 @@ dependencies = [
  "getrandom 0.2.15",
  "libredox 0.1.3",
  "thiserror",
-]
-
-[[package]]
-name = "rrt_demo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "ctrlc",
- "get-size",
- "hex",
- "indicatif",
- "lazy_static",
- "measure_time",
- "peak_alloc",
- "png",
- "pysparse",
- "rand 0.8.5",
- "rayon",
- "rrt_lib",
- "sim",
- "util",
 ]
 
 [[package]]

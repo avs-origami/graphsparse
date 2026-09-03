@@ -7,8 +7,6 @@ members = [
     "trainer",
     "pysparse",
     "rrt_fast",
-    "demo",
-    "rrt_demo",
 ]
 
 resolver = "2"
@@ -18,3 +16,5 @@ opt-level = 3
 
 [profile.release]
 debug = true
+lto = "thin"
+codegen-units = 1

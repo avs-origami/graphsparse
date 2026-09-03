@@ -23,6 +23,13 @@ pub use crate::api::{Cmd, Req, SimApi};
 
 const GRID_SIZE: u32 = 30;
 
+/// Collision check: true iff the robot's own pixel would overlap an obstacle.
+/// Callers reject the step (restore prev position) when this returns true.
+fn collides(win: &Win) -> bool {
+    let idx = win.rob.fb_coords() as usize;
+    idx < win.buf.len() && win.buf[idx] == DPURPLE
+}
+
 #[derive(Clone)]
 pub struct Sim {
     queue: Arc<Mutex<VecDeque<CmdReq>>>,
@@ -176,14 +183,14 @@ impl Sim {
                 if let Some(cmd) = self.queue.lock().unwrap().pop_front() {
                     match cmd {
                         CmdStep => {
+                            let (px, py) = (win.rob.x, win.rob.y);
                             win.rob.step();
 
-                            if !self.args.phasing {
-                                if win.is_touching(win.rob.fb_coords() as i32, DPURPLE, false) {
-                                    win.rob.step_by(-2.0);
-                                    same_move = true;
-                                    hit = true;
-                                }
+                            if !self.args.phasing && collides(&win) {
+                                win.rob.x = px;
+                                win.rob.y = py;
+                                same_move = true;
+                                hit = true;
                             }
 
                             if win.rob.x > W32 as f32 {
@@ -191,10 +198,6 @@ impl Sim {
                             }
 
                             win.update().unwrap();
-                            // if !win.win.is_open() {
-                            //     child_alg.kill().unwrap();
-                            //     break 'o;
-                            // }
                         },
                         CmdRot(x) => {
                             win.rob.rot(x);
@@ -202,38 +205,30 @@ impl Sim {
                         },
                         CmdStepBy(x) => {
                             for _ in 0..x.round() as usize {
+                                let (px, py) = (win.rob.x, win.rob.y);
                                 win.rob.step();
-                                if !self.args.phasing {
-                                    if win.is_touching(win.rob.fb_coords() as i32, DPURPLE, false) {
-                                        win.rob.step_by(-2.0);
-                                        same_move = true;
-                                        hit = true;
-                                    }
+                                if !self.args.phasing && collides(&win) {
+                                    win.rob.x = px;
+                                    win.rob.y = py;
+                                    same_move = true;
+                                    hit = true;
                                 }
 
                                 win.update().unwrap();
-                                // if !win.win.is_open() {
-                                //     child_alg.kill().unwrap();
-                                //     break 'o;
-                                // }
                             }
                         },
                         CmdStepBack(x) => {
                             for _ in 0..x.round() as usize {
+                                let (px, py) = (win.rob.x, win.rob.y);
                                 win.rob.step_by(-1.0);
-                                if !self.args.phasing {
-                                    if win.is_touching(win.rob.fb_coords() as i32, DPURPLE, false) {
-                                        win.rob.step_by(2.0);
-                                        same_move = false;
-                                        hit = true;
-                                    }
+                                if !self.args.phasing && collides(&win) {
+                                    win.rob.x = px;
+                                    win.rob.y = py;
+                                    same_move = false;
+                                    hit = true;
                                 }
 
                                 win.update().unwrap();
-                                // if !win.win.is_open() {
-                                //     child_alg.kill().unwrap();
-                                //     break 'o;
-                                // }
                             }
                         },
                         CmdRotBy(x) => {
@@ -243,27 +238,10 @@ impl Sim {
                                 win.update().unwrap();
                             }
                         },
-                        CmdDrawTree(_) => (),
-                        // CmdDrawTree => {
-                        //     let ans: Vec<u32> = cmd[2..cmd[1] as usize + 1]
-                        //         .iter()
-                        //         .map(|x| *x as u32)
-                        //         .collect();
-
-                        //     win.replace(BLUE, LYELLOW).unwrap();
-                        //     win.draw(&ans, BLUE).unwrap();
-                        //     win.update().unwrap();
-                        // },
-                        // CmdDrawTree2 => {
-                        //     let ans: Vec<u32> = cmd[2..cmd[1] as usize + 1]
-                        //         .iter()
-                        //         .map(|x| *x as u32)
-                        //         .collect();
-
-                        //     win.replace(BLUE, LYELLOW).unwrap();
-                        //     win.draw(&ans, CYAN).unwrap();
-                        //     win.update().unwrap();
-                        // },
+                        CmdDrawTree(pix) => {
+                            win.overlay(pix);
+                            win.update().unwrap();
+                        },
                         CmdAddScore => score += 1,
                         // CmdStatsMem => mem = cmd[2],
                         CmdStatsTime(x) => time = x,
@@ -449,7 +427,7 @@ impl Sim {
                         if *point == GREEN {
                             let mut around = vec![];
                             for n in 0..win.buf.len() {
-                                if is_agent(n as i32, idx as i32, 1) {
+                                if n == idx {
                                     around.push(n);
                                 }
                             }

@@ -18,6 +18,15 @@ pub enum OnOff {
     Off
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum, Serialize)]
+pub enum Activation {
+    #[value(name = "tanh")]
+    Tanh,
+    #[value(name = "relu")]
+    ReLU
+}
+
+
 /// This struct contains all options and hyperparameters for model training and
 /// inference.
 /// 
@@ -35,7 +44,7 @@ pub enum OnOff {
 ///     ..Default::default()
 /// };
 /// ```
-#[derive(Clone, Copy, Debug, Parser, Serialize)]
+#[derive(Clone, Debug, Parser, Serialize)]
 #[command(about = "Program used to train the RL model", long_about = None)]
 pub struct GlobalOpts {
     // =========================================
@@ -60,7 +69,7 @@ pub struct GlobalOpts {
     /// Number of minibathces to train on.
     #[arg(long, default_value_t = DEF.num_minis)]
     pub num_minis: usize,
-    /// Number of robot moves for context collection.
+    /// How many episodes to complete before training the actor.
     #[arg(long, default_value_t = DEF.warmup)]
     pub warmup: usize,
     /// Number of nodes to prune per timestep.
@@ -69,6 +78,9 @@ pub struct GlobalOpts {
     /// Total fraction of nodes to prune between robot moves.
     #[arg(long, default_value_t = DEF.prune_frac)]
     pub prune_frac: f32,
+    /// Number of evals per episode.
+    #[arg(long, default_value_t = DEF.num_eval)]
+    pub num_eval: usize,
 
     // =========================================
     // =======   Model Hyperparameters   =======
@@ -111,12 +123,15 @@ pub struct GlobalOpts {
     /// Patch size for GTrXL input.
     #[arg(long, default_value_t = DEF.patch_size)]
     pub patch_size: usize,
-    /// Image channels.
+    /// Image channels. Options are 3 or 1.
     #[arg(long, default_value_t = DEF.img_chan)]
     pub img_chan: usize,
     /// Number of gaussian components to predict.
     #[arg(long, default_value_t = DEF.num_gauss)]
     pub num_gauss: usize,
+    /// Activation function for linear heads.
+    #[arg(value_enum, long, default_value_t = DEF.activation)]
+    pub activation: Activation,
     
     // =========================================
     // ========   PPO Hyperparameters   ========
@@ -175,6 +190,9 @@ pub struct GlobalOpts {
     /// Whether to render the simulation.
     #[arg(long, default_value_t = DEF.render)]
     pub render: bool,
+    /// Whether to hide the tree. Only takes effect with --render.
+    #[arg(long, default_value_t = DEF.htree)]
+    pub htree: bool,
     /// Whether to show debugging info.
     #[arg(long, default_value_t = DEF.dbg)]
     pub dbg: bool,
@@ -187,25 +205,37 @@ pub struct GlobalOpts {
     /// Random pruning.
     #[arg(long, default_value_t = DEF.random)]
     pub random: bool,
+    /// Seed for the RNG.
+    #[arg(long)]
+    pub seed: Option<u64>,
+    /// Load model files. Format: "run_id, checkpoint". If checkpoint specified,
+    /// ppo[checkpoint].pt and [checkpoint].pt are tried; otherwise,
+    /// use the highest-numbered ppoXX.pt checkpoint.
+    #[arg(long, value_delimiter = ',')]
+    pub load: Option<Vec<String>>,
     /// Directory to save model files.
-    #[clap(skip)]
-    pub save_dir: &'static str,
+    #[arg(long, default_value_t = DEF.save_dir.clone())]
+    pub save_dir: String,
+    /// Whether to show even more debugging info than --dbg.
+    #[arg(long, default_value_t = DEF.verbose)]
+    pub verbose: bool,
 }
 
 impl Default for GlobalOpts {
     fn default() -> Self {
         GlobalOpts {
-            episodes: 2000,
-            num_steps: 512,
-            num_moves: 100,
+            episodes: 500,
+            num_steps: 2048,
+            num_moves: 50,
             num_envs: 1,
             ppo_epochs: 4,
-            num_minis: 4,
-            warmup: 5,
+            num_minis: 16,
+            warmup: 15,
             num_prune: 25,
             prune_frac: 0.96,
+            num_eval: 3,
             hidden_size: 512,
-            num_hidden: 6,
+            num_hidden: 3,
             num_actions: 2,
             d_model: 1024,
             gtrxl_layers: 3,
@@ -213,39 +243,36 @@ impl Default for GlobalOpts {
             d_head_inner: 512,
             d_ff_inner: 512,
             d_comp: 64,
-            gtrxl_mem_len: 400,
+            gtrxl_mem_len: 100,
             img_size: 250,
             patch_size: 25,
-            img_chan: 3,
-            num_gauss: 8,
+            img_chan: 1,
+            num_gauss: 32,
+            activation: Activation::Tanh,
             anneal_lr: true,
             norm_adv: true,
             clip_vloss: true,
             early_stop: true,
             stochastic: OnOff::On,
-            lr: 3e-4,
+            lr: 1e-4,
             gamma: 0.99,
             gae_lambda: 0.95,
             clip_coef: 0.1,
-            ent_coef: 0.01,
+            ent_coef: 5e-4,
             vf_coef: 0.5,
             max_grad_norm: 0.5,
-            target_kl: 0.03,
-            clutter: Clutter::Mid,
+            target_kl: 0.08,
+            clutter: Clutter::Spicy,
             render: false,
+            htree: false,
             dbg: false,
             test: false,
             no_prune: false,
             random: false,
-            save_dir: "models",
+            seed: None,
+            load: None,
+            save_dir: "models".into(),
+            verbose: false,
         }
-    }
-}
-
-impl GlobalOpts {
-    pub fn from_cli() -> Self {
-        let mut me = GlobalOpts::parse();
-        me.save_dir = DEF.save_dir;
-        return me;
     }
 }
